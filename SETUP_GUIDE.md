@@ -48,12 +48,6 @@ File này sẽ tự động:
 
 ### Bước 4: Chạy ứng dụng (3 terminal)
 
-> [!IMPORTANT]
-> **Khi cập nhật / Pull code mới**: Mỗi khi kéo code mới về, vui lòng chạy lệnh `npm install` trong thư mục `frontend` trước để cập nhật các package frontend mới nhất:
-> ```powershell
-> cd frontend && npm install
-> ```
-
 ```powershell
 # Terminal 1 — Backend
 python manage.py runserver

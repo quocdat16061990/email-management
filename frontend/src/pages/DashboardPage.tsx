@@ -22,7 +22,7 @@ export default function DashboardPage() {
   const [sortBy, setSortBy] = useState('created_at')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
 
-  const { data, isLoading, isError, refetch } = useStudentList({
+  const { data, isLoading, isFetching, isError, refetch } = useStudentList({
     q: query,
     page,
     sort_by: sortBy,
@@ -96,7 +96,7 @@ export default function DashboardPage() {
       {/* Actions */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="w-full sm:w-72">
-          <SearchInput value={searchValue} onChange={handleSearch} placeholder="Tìm kiếm học viên..." />
+          <SearchInput value={searchValue} onChange={handleSearch} placeholder="Tìm kiếm học viên..." loading={isFetching} />
         </div>
         <div className="flex gap-2">
           <button onClick={handleSync} disabled={syncMutation.isPending}
@@ -113,7 +113,13 @@ export default function DashboardPage() {
       </div>
 
       {/* Table */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden relative">
+        {/* Top fetching progress bar */}
+        {isFetching && (
+          <div className="absolute top-0 left-0 right-0 h-0.5 bg-brand-50 overflow-hidden z-10">
+            <div className="h-full bg-brand-500 animate-pulse w-full" />
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
@@ -152,7 +158,7 @@ export default function DashboardPage() {
                 <th className="text-right px-2 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Hành động</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-50">
+            <tbody className={`divide-y divide-gray-50 transition-opacity duration-200 ${isFetching ? 'opacity-50 pointer-events-none' : ''}`}>
               {isLoading && (
                 <tr><td colSpan={7}>
                   <div className="flex items-center justify-center py-8 gap-2">

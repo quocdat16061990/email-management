@@ -4,9 +4,10 @@ interface SearchInputProps {
   value: string
   onChange: (value: string) => void
   placeholder?: string
+  loading?: boolean
 }
 
-export default function SearchInput({ value, onChange, placeholder = 'Tìm kiếm...' }: SearchInputProps) {
+export default function SearchInput({ value, onChange, placeholder = 'Tìm kiếm...', loading = false }: SearchInputProps) {
   const [local, setLocal] = useState(value)
 
   useEffect(() => {
@@ -22,9 +23,13 @@ export default function SearchInput({ value, onChange, placeholder = 'Tìm kiế
 
   return (
     <div className="relative">
-      <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-      </svg>
+      {loading ? (
+        <div className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />
+      ) : (
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+        </svg>
+      )}
       <input
         type="text"
         value={local}
