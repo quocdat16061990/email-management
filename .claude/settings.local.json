@@ -6,7 +6,8 @@
       "Bash(python manage.py run_otp_bot)",
       "Bash(python -c ' *)",
       "Bash(npx tsc *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "WebSearch"
     ]
   }
 }

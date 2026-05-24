@@ -445,6 +445,7 @@ def api_student_detail(request: HttpRequest, id: int) -> JsonResponse:
         "registration_date": str(student.registration_date) if student.registration_date else None,
         "expiry_date": str(student.expiry_date) if student.expiry_date else None,
         "telegram_chat_id": student.telegram_chat_id,
+        "is_verified_telegram": student.is_verified_telegram,
         "created_at": student.created_at.isoformat(),
         "enrollments": enrollments,
     })

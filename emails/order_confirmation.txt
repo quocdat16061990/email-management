@@ -1,0 +1,14 @@
+Don hang cua ban da duoc tao thanh cong.
+
+Ma don hang: #{{ order.id }}
+San pham: {{ product_name }}
+Tong tien: {{ total_amount }}
+Trang thai: {{ order.status }}
+
+Thong tin chuyen khoan:
+Ngan hang: {{ bank_name }}
+So tai khoan: {{ bank_account_number }}
+Chu tai khoan: {{ bank_account_name }}
+Noi dung chuyen khoan: {{ transfer_note }}
+
+Ho tro: {{ support_email }}

@@ -29,12 +29,15 @@ from .services import (
     list_available_courses,
     lookup_customer_by_email,
     mark_customer_otp_received,
+    get_or_create_customer_for_otp,
+    send_telegram_otp_email,
 )
 
 
 logger = logging.getLogger(__name__)
 
 ASK_EMAIL = 0
+ASK_OTP = 1
 
 ENROLLMENT_STATUS_LABELS = {
     "ACTIVE": "✅ Đang hoạt động",
@@ -205,7 +208,7 @@ async def course_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 # ─── Handle email input ─────────────────────────────────────────────────────
 
 async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    email_text = update.message.text.strip()
+    email_text = update.message.text.strip().lower()
 
     if not is_valid_email(email_text):
         await update.message.reply_text(
@@ -214,34 +217,126 @@ async def handle_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         )
         return ASK_EMAIL
 
+    import random
+    otp_code = f"{random.randint(100000, 999999)}"
+
     try:
-        customer = await sync_to_async(create_or_update_customer)(update.effective_chat.id, email_text)
-        available_courses = await sync_to_async(list_available_courses)()
+        # Create or update customer record for OTP
+        customer = await sync_to_async(get_or_create_customer_for_otp)(email_text, otp_code)
+        
+        # Send verification OTP email
+        email_sent = await sync_to_async(send_telegram_otp_email)(email_text, otp_code)
+        if not email_sent:
+            raise Exception("Failed to send OTP email.")
     except Exception:
-        logger.exception("Không tạo được phiên customer.")
+        logger.exception("Không tạo được phiên xác thực hoặc gửi email.")
         await update.message.reply_text(
-            "❌ Không khởi tạo được phiên làm việc. Vui lòng thử lại sau.",
+            "❌ Không gửi được mã xác thực đến email của bạn. Vui lòng kiểm tra lại cấu hình SMTP hoặc thử lại sau.",
             reply_markup=restart_keyboard(),
         )
         return ConversationHandler.END
 
-    context.user_data["email"] = email_text
-    context.user_data["otp_session_started_at"] = time.time()
-
-    courses_list = await sync_to_async(list)(customer.courses.all())
-    assigned_courses = ", ".join(course.name for course in courses_list) or "Chưa có khóa học nào."
+    context.user_data["pending_email"] = email_text
+    context.user_data["otp_attempts"] = 0
 
     await update.message.reply_text(
-        f"✅ *Xác nhận email thành công!*\n\n"
-        f"📧 `{email_text}`\n"
-        f"👤 {customer.full_name or 'Chưa cập nhật'}\n"
-        f"📞 {customer.phone_number or 'Chưa có SĐT'}\n\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"📚 *Khóa học của bạn:*\n{assigned_courses}\n\n"
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"👉 *Bước tiếp theo:* Truy cập trang OpenAI, gửi mã OTP, "
-        f"sau đó bấm nút \"🔑 Lấy OTP\" bên dưới để tôi tự động lấy mã từ Gmail cho bạn.",
-        reply_markup=enrollment_keyboard(),
+        f"🔑 *Đã gửi mã xác thực!*\n\n"
+        f"Một mã OTP gồm 6 chữ số đã được gửi đến email: `{email_text}`.\n"
+        f"Mã có hiệu lực trong 10 phút. Vui lòng kiểm tra hộp thư và nhập mã OTP vào đây để tiếp tục.",
+        reply_markup=restart_keyboard(),
+        parse_mode="Markdown",
+    )
+    return ASK_OTP
+
+
+async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    otp_text = update.message.text.strip()
+    email_text = context.user_data.get("pending_email")
+    chat_id = update.effective_chat.id
+
+    if not email_text:
+        await update.message.reply_text(
+            "❌ Phiên xác thực không hợp lệ. Vui lòng bấm /start để thực hiện lại.",
+            reply_markup=restart_keyboard(),
+        )
+        return ConversationHandler.END
+
+    from .models import Customer
+    from django.utils import timezone
+    from datetime import timedelta
+
+    customer = await sync_to_async(Customer.objects.filter(customer_email=email_text).first)()
+    if not customer:
+        await update.message.reply_text(
+            "❌ Không tìm thấy thông tin học viên. Vui lòng bấm /start để bắt đầu lại.",
+            reply_markup=restart_keyboard(),
+        )
+        return ConversationHandler.END
+
+    now = timezone.now()
+    is_expired = False
+    if customer.telegram_otp_created_at:
+        expiry_limit = customer.telegram_otp_created_at + timedelta(minutes=10)
+        if now > expiry_limit:
+            is_expired = True
+
+    if is_expired or not customer.telegram_otp or customer.telegram_otp != otp_text:
+        attempts = context.user_data.get("otp_attempts", 0) + 1
+        context.user_data["otp_attempts"] = attempts
+
+        if attempts >= 5:
+            await update.message.reply_text(
+                "❌ Bạn đã nhập sai mã OTP quá nhiều lần. Vui lòng bấm /start để thực hiện lại.",
+                reply_markup=restart_keyboard(),
+            )
+            context.user_data.clear()
+            return ConversationHandler.END
+
+        await update.message.reply_text(
+            f"❌ Mã OTP không chính xác hoặc đã hết hạn (lần {attempts}/5). Vui lòng thử lại.",
+            reply_markup=restart_keyboard(),
+        )
+        return ASK_OTP
+
+    # Successful verification!
+    # 1. Unlink any other customers with this chat_id
+    await sync_to_async(
+        lambda: Customer.objects.filter(telegram_chat_id=chat_id)
+        .exclude(customer_email=email_text)
+        .update(telegram_chat_id=None, is_verified_telegram=False)
+    )()
+
+    # 2. Update current customer
+    customer.telegram_chat_id = chat_id
+    customer.is_verified_telegram = True
+    customer.telegram_otp = None
+    customer.telegram_otp_created_at = None
+    if customer.status == "PENDING":
+        customer.status = "ACTIVE"
+    await sync_to_async(customer.save)()
+
+    context.user_data["email"] = email_text
+    context.user_data.pop("pending_email", None)
+    context.user_data.pop("otp_attempts", None)
+
+    courses_list = await sync_to_async(list)(customer.courses.all())
+    if courses_list:
+        max_display = 5
+        displayed_courses = courses_list[:max_display]
+        assigned_courses = "\n".join(f"• 📖 {c.name}" for c in displayed_courses)
+        if len(courses_list) > max_display:
+            assigned_courses += f"\n• ➕ _và {len(courses_list) - max_display} khóa học khác..._"
+    else:
+        assigned_courses = "❌ Chưa có khóa học nào."
+
+    await update.message.reply_text(
+        f"✅ *Xác thực thành công!*\n\n"
+        f"📧 Tài khoản Telegram của bạn đã được liên kết với email `{email_text}`.\n\n"
+        f"👤 Họ tên: {customer.full_name or 'Chưa cập nhật'}\n"
+        f"📞 SĐT: {customer.phone_number or 'Chưa có SĐT'}\n"
+        f"📚 Khóa học của bạn:\n{assigned_courses}\n\n"
+        f"Bây giờ bạn đã có thể sử dụng menu bên dưới.",
+        reply_markup=main_menu_keyboard(),
         parse_mode="Markdown",
     )
     return ConversationHandler.END
@@ -364,6 +459,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "👤 /me — Xem thông tin cá nhân\n"
         "📚 /courses — Xem danh sách khóa học\n"
         "🔑 /otp — Lấy mã OTP OpenAI nhanh\n"
+        "🔗 /unlink — Hủy liên kết Telegram hiện tại để liên kết email khác\n"
         "🔍 /lookup `<email>` — Tra cứu học viên\n"
         "❓ /help — Hướng dẫn này\n\n"
         "━━━━━━━━━━━━━━━━━━\n"
@@ -471,7 +567,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def _find_customer_by_chat_id(chat_id: int):
     from .models import Customer
-    return await sync_to_async(Customer.objects.filter(telegram_chat_id=chat_id).first)()
+    return await sync_to_async(Customer.objects.filter(telegram_chat_id=chat_id, is_verified_telegram=True).first)()
 
 
 async def _reply_not_linked(update: Update) -> None:
@@ -483,6 +579,38 @@ async def _reply_not_linked(update: Update) -> None:
         await update.message.reply_text(text, reply_markup=restart_keyboard())
 
 
+async def unlink_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.clear()
+    chat_id = update.effective_chat.id
+
+    from .models import Customer
+    customer = await sync_to_async(Customer.objects.filter(telegram_chat_id=chat_id).first)()
+
+    if customer:
+        email = customer.customer_email
+        customer.telegram_chat_id = None
+        customer.is_verified_telegram = False
+        customer.telegram_otp = None
+        customer.telegram_otp_created_at = None
+        await sync_to_async(customer.save)()
+
+        await update.message.reply_text(
+            f"🔗 *Đã huỷ liên kết tài khoản thành công!*\n\n"
+            f"Tài khoản Telegram của bạn đã ngắt kết nối với email `{email}`.\n"
+            f"Vui lòng nhập *email* mới của bạn để bắt đầu liên kết.",
+            reply_markup=restart_keyboard(),
+            parse_mode="Markdown",
+        )
+    else:
+        await update.message.reply_text(
+            "👋 *Xin chào!*\n\nVui lòng nhập *email* của bạn để bắt đầu.",
+            reply_markup=restart_keyboard(),
+            parse_mode="Markdown",
+        )
+
+    return ASK_EMAIL
+
+
 # ─── Build application ──────────────────────────────────────────────────────
 
 def build_application() -> Application:
@@ -492,11 +620,25 @@ def build_application() -> Application:
     application = Application.builder().token(settings.TELEGRAM_BOT_TOKEN).build()
 
     conversation_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CommandHandler("unlink", unlink_command),
+        ],
         states={
-            ASK_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_email)],
+            ASK_EMAIL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_email),
+                CallbackQueryHandler(restart_flow, pattern="^restart_flow$"),
+            ],
+            ASK_OTP: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_otp),
+                CallbackQueryHandler(restart_flow, pattern="^restart_flow$"),
+            ],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CommandHandler("start", start),
+            CommandHandler("unlink", unlink_command),
+        ],
         per_chat=True,
         per_user=True,
         per_message=False,
@@ -508,6 +650,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("lookup", lookup_customer))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("otp", otp_command))
+    application.add_handler(CommandHandler("unlink", unlink_command))
     application.add_handler(CallbackQueryHandler(restart_flow, pattern="^restart_flow$"))
     application.add_handler(CallbackQueryHandler(fetch_openai_otp, pattern="^fetch_openai_otp$"))
     application.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))

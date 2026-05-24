@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Xác nhận đơn hàng</title>
+</head>
+<body style="margin:0;padding:0;background:#f5f7fb;font-family:Arial,sans-serif;color:#1f2937;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f5f7fb;padding:24px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="680" cellspacing="0" cellpadding="0" style="max-width:680px;width:100%;background:#ffffff;border-radius:18px;overflow:hidden;">
+          <tr>
+            <td style="background:linear-gradient(135deg,#16a34a,#064e3b);padding:28px 32px;color:#ffffff;">
+              <div style="font-size:14px;opacity:.85;">Muataikhoan.vn</div>
+              <h1 style="margin:8px 0 0;font-size:28px;line-height:1.2;">Đơn hàng đã được tạo thành công</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:32px;">
+              <p style="margin:0 0 20px;font-size:16px;line-height:1.7;">Cảm ơn bạn đã đặt hàng. Dưới đây là thông tin đơn hàng của bạn.</p>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;">
+                <tr>
+                  <td style="padding:12px 0;border-bottom:1px solid #e5e7eb;font-size:15px;color:#64748b;">Mã đơn hàng</td>
+                  <td align="right" style="padding:12px 0;border-bottom:1px solid #e5e7eb;font-size:15px;font-weight:700;">#{{ order.id }}</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 0;border-bottom:1px solid #e5e7eb;font-size:15px;color:#64748b;">Sản phẩm</td>
+                  <td align="right" style="padding:12px 0;border-bottom:1px solid #e5e7eb;font-size:15px;font-weight:700;">{{ product_name }}</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 0;border-bottom:1px solid #e5e7eb;font-size:15px;color:#64748b;">Tổng tiền</td>
+                  <td align="right" style="padding:12px 0;border-bottom:1px solid #e5e7eb;font-size:15px;font-weight:700;color:#dc2626;">{{ total_amount }}</td>
+                </tr>
+                <tr>
+                  <td style="padding:12px 0;border-bottom:1px solid #e5e7eb;font-size:15px;color:#64748b;">Trạng thái</td>
+                  <td align="right" style="padding:12px 0;border-bottom:1px solid #e5e7eb;font-size:15px;font-weight:700;text-transform:uppercase;">{{ order.status }}</td>
+                </tr>
+              </table>
+
+              <div style="margin-top:28px;padding:24px;border-radius:16px;background:#f8fafc;border:1px solid #e5e7eb;">
+                <div style="font-size:16px;font-weight:700;margin-bottom:16px;">Thông tin chuyển khoản</div>
+                <div style="font-size:15px;line-height:1.8;">
+                  <div><strong>Ngân hàng:</strong> {{ bank_name }}</div>
+                  <div><strong>Số tài khoản:</strong> {{ bank_account_number }}</div>
+                  <div><strong>Chủ tài khoản:</strong> {{ bank_account_name }}</div>
+                </div>
+                <div style="margin-top:18px;padding:16px;border-radius:14px;background:#ecfeff;border:1px dashed #22c55e;">
+                  <div style="font-size:13px;letter-spacing:1px;text-transform:uppercase;color:#0f766e;">Nội dung chuyển khoản</div>
+                  <div style="margin-top:8px;font-size:28px;font-weight:700;color:#065f46;">{{ transfer_note }}</div>
+                </div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:20px 32px;background:#f8fafc;border-top:1px solid #e5e7eb;font-size:13px;color:#64748b;">
+              Hỗ trợ: {{ support_email }}
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

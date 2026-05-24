@@ -1,0 +1,10 @@
+Don hang cua ban da thanh toan thanh cong.
+
+Ma don hang: #{{ order.id }}
+San pham: {{ product_name }}
+Tong tien: {{ total_amount }}
+Trang thai: {{ order.status }}
+
+Cam on ban da thanh toan. Don hang cua ban se duoc xu ly trong thoi gian som nhat.
+
+Ho tro: {{ support_email }}

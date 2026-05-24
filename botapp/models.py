@@ -41,6 +41,9 @@ class Customer(models.Model):
     expiry_date = models.DateField(null=True, blank=True)
     status = models.CharField(max_length=20, default="ACTIVE")
     has_sent_otp = models.BooleanField(default=False)
+    is_verified_telegram = models.BooleanField(default=False)
+    telegram_otp = models.CharField(max_length=6, null=True, blank=True)
+    telegram_otp_created_at = models.DateTimeField(null=True, blank=True)
     courses = models.ManyToManyField(Course, through="Enrollment", blank=True, related_name="customers")
     created_at = models.DateTimeField(auto_now_add=True)
 

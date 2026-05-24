@@ -79,7 +79,18 @@ export default function StudentDetailPage() {
               {student.telegram_chat_id && (
                 <div>
                   <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Telegram Chat ID</p>
-                  <p className="text-sm text-gray-900">{student.telegram_chat_id}</p>
+                  <p className="text-sm text-gray-900 flex items-center gap-1.5 mt-0.5">
+                    {student.telegram_chat_id}
+                    {student.is_verified_telegram ? (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-100">
+                        Đã xác thực
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-100">
+                        Chưa xác thực
+                      </span>
+                    )}
+                  </p>
                 </div>
               )}
               <div>

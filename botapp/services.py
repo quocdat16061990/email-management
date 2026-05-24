@@ -9,7 +9,9 @@ from email.utils import parsedate_to_datetime
 from typing import Iterable
 
 from django.conf import settings
+from django.core.mail import EmailMultiAlternatives
 from django.db.models import Q
+from django.template.loader import render_to_string
 from django.utils import timezone
 
 from .models import Course, Customer
@@ -94,6 +96,61 @@ def create_or_update_customer(chat_id: int, customer_email: str) -> Customer:
         if courses:
             customer.courses.set(courses)
     return customer
+
+
+def get_or_create_customer_for_otp(customer_email: str, otp_code: str) -> Customer:
+    normalized_email = customer_email.strip().lower()
+    customer = Customer.objects.filter(customer_email=normalized_email).first()
+    if not customer:
+        customer = Customer.objects.create(
+            customer_email=normalized_email,
+            status="PENDING",
+            has_sent_otp=False,
+            is_verified_telegram=False,
+        )
+        profile_data = _build_customer_profile(0, normalized_email)
+        for field_name, value in profile_data.items():
+            setattr(customer, field_name, value)
+        customer.save()
+        
+        courses = list(Course.objects.filter(name__in=_default_course_names(0, normalized_email)))
+        if courses:
+            customer.courses.set(courses)
+            
+    customer.telegram_otp = otp_code
+    customer.telegram_otp_created_at = timezone.now()
+    customer.save(update_fields=["telegram_otp", "telegram_otp_created_at"])
+    return customer
+
+
+def send_telegram_otp_email(to_email: str, otp_code: str) -> bool:
+    try:
+        context = {
+            "purpose": "Xác thực tài khoản Telegram",
+            "code": otp_code,
+            "expire_minutes": 10,
+            "support_email": settings.EMAIL_ACCOUNT,
+            "company_name": settings.COMPANY_NAME,
+        }
+        html_content = render_to_string("otp_email.html", context)
+        text_content = render_to_string("otp_email.txt", context)
+        
+        subject = f"[{settings.COMPANY_NAME}] Mã OTP xác thực Telegram"
+        from_email = f"{settings.COMPANY_NAME} <{settings.EMAIL_ACCOUNT}>"
+        
+        msg = EmailMultiAlternatives(
+            subject=subject,
+            body=text_content,
+            from_email=from_email,
+            to=[to_email.strip()],
+        )
+        msg.attach_alternative(html_content, "text/html")
+        msg.send()
+        logger.info(f"Đã gửi email OTP xác thực Telegram tới {to_email}")
+        return True
+    except Exception as e:
+        logger.exception(f"Lỗi gửi email OTP tới {to_email}: {e}")
+        return False
 
 
 def upsert_customer_from_web(

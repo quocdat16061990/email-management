@@ -7,6 +7,7 @@ export interface Student {
   registration_date: string | null;
   expiry_date: string | null;
   telegram_chat_id?: number | null;
+  is_verified_telegram?: boolean;
   created_at?: string;
   enrollments?: EnrollmentDetail[];
 }
