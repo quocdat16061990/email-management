@@ -546,11 +546,15 @@ async def restart_flow(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
-    await query.edit_message_text(
-        "👋 *Xin chào!*\n\nVui lòng nhập *email* của bạn để bắt đầu.",
-        reply_markup=restart_keyboard(),
-        parse_mode="Markdown",
-    )
+    try:
+        await query.edit_message_text(
+            "👋 *Xin chào!*\n\nVui lòng nhập *email* của bạn để bắt đầu.",
+            reply_markup=restart_keyboard(),
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        if "Message is not modified" not in str(e):
+            logger.warning(f"Lỗi edit_message_text trong restart_flow: {e}")
     return ASK_EMAIL
 
 
@@ -611,6 +615,41 @@ async def unlink_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ASK_EMAIL
 
 
+async def unlink_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    chat_id = update.effective_chat.id
+
+    from .models import Customer
+    customer = await sync_to_async(Customer.objects.filter(telegram_chat_id=chat_id).first)()
+
+    if customer:
+        email = customer.customer_email
+        customer.telegram_chat_id = None
+        customer.is_verified_telegram = False
+        customer.telegram_otp = None
+        customer.telegram_otp_created_at = None
+        await sync_to_async(customer.save)()
+
+        text = (
+            f"🚪 *Đã đăng xuất & Hủy liên kết thành công!*\n\n"
+            f"Tài khoản Telegram của bạn đã ngắt kết nối với email `{email}`.\n"
+            f"Vui lòng nhấn nút bên dưới hoặc gõ lệnh /start để bắt đầu liên kết mới."
+        )
+    else:
+        text = (
+            "👋 *Xin chào!*\n\nVui lòng nhấn nút bên dưới hoặc gõ lệnh /start để bắt đầu."
+        )
+
+    await query.edit_message_text(
+        text,
+        reply_markup=restart_keyboard(),
+        parse_mode="Markdown",
+    )
+    return ConversationHandler.END
+
+
 # ─── Build application ──────────────────────────────────────────────────────
 
 def build_application() -> Application:
@@ -623,6 +662,7 @@ def build_application() -> Application:
         entry_points=[
             CommandHandler("start", start),
             CommandHandler("unlink", unlink_command),
+            CallbackQueryHandler(restart_flow, pattern="^restart_flow$"),
         ],
         states={
             ASK_EMAIL: [
@@ -651,6 +691,7 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("otp", otp_command))
     application.add_handler(CommandHandler("unlink", unlink_command))
+    application.add_handler(CallbackQueryHandler(unlink_callback, pattern="^unlink_account$"))
     application.add_handler(CallbackQueryHandler(restart_flow, pattern="^restart_flow$"))
     application.add_handler(CallbackQueryHandler(fetch_openai_otp, pattern="^fetch_openai_otp$"))
     application.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))

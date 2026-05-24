@@ -11,6 +11,7 @@ def main_menu_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("📚 Khóa học của tôi", callback_data="my_courses")],
         [InlineKeyboardButton("🔑 Lấy mã OTP", callback_data="fetch_openai_otp")],
         [InlineKeyboardButton("❓ Trợ giúp", callback_data="help")],
+        [InlineKeyboardButton("🚪 Đăng xuất", callback_data="unlink_account")],
     ]
     return InlineKeyboardMarkup(buttons)
 
