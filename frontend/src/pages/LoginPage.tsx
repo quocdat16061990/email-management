@@ -55,10 +55,12 @@ export default function LoginPage() {
         <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 p-8">
           {/* Logo */}
           <div className="flex flex-col items-center mb-8">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-brand-500 via-accent-500 to-rose-500 flex items-center justify-center text-white font-extrabold text-2xl shadow-lg shadow-brand-500/30 mb-4">
-              OA
-            </div>
-            <h1 className="text-xl font-bold text-gray-900">Anhlaptrinh Management</h1>
+            <img 
+              src="/logo.png" 
+              alt="Logo" 
+              className="w-16 h-16 object-contain mb-4" 
+            />
+            <h1 className="text-xl font-bold text-gray-900">Anh Lap Trinh</h1>
             <p className="text-sm text-gray-500 mt-1">Đăng nhập để quản lý hệ thống</p>
           </div>
 

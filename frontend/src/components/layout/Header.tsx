@@ -17,11 +17,13 @@ export default function Header() {
         <div className="flex items-center justify-between h-16">
           {/* Brand */}
           <Link to="/dashboard" className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand-500 via-accent-500 to-rose-500 flex items-center justify-center text-white font-extrabold text-sm shadow-lg shadow-brand-500/25">
-              OA
-            </div>
+            <img 
+              src="/logo.png" 
+              alt="Logo" 
+              className="w-9 h-9 object-contain" 
+            />
             <span className="text-lg font-bold bg-gradient-to-r from-brand-600 via-accent-500 to-rose-500 bg-clip-text text-transparent hidden sm:block">
-              Anhlaptrinh Management
+              Anh Lap Trinh
             </span>
           </Link>
 

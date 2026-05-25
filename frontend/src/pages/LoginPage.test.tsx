@@ -53,7 +53,7 @@ describe('pages/LoginPage.tsx', () => {
   test('renders form elements correctly', () => {
     renderLoginPage()
     
-    expect(screen.getByRole('heading', { name: /Anhlaptrinh Management/i })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /Anh Lap Trinh/i })).toBeInTheDocument()
     expect(screen.getByText('Email')).toBeInTheDocument()
     expect(screen.getByText('Mật khẩu')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('admin@example.com')).toBeInTheDocument()
