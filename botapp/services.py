@@ -371,7 +371,9 @@ def mark_customer_otp_received(chat_id: int, customer_email: str) -> None:
 def sync_courses_from_voomly() -> dict[str, int]:
     import requests
     from django.conf import settings
-    from .models import Course
+    from .models import Course, CourseLink
+    from django.db import transaction
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     
     url = "https://api.voomly.com/spotlights?tiny=1"
     headers = {
@@ -396,6 +398,7 @@ def sync_courses_from_voomly() -> dict[str, int]:
         created_count = 0
         updated_count = 0
         
+        # 1. Sync courses and spotlight_ids from list API
         for spotlight in spotlights:
             spotlight_id = spotlight.get("id")
             name = spotlight.get("name")
@@ -427,6 +430,48 @@ def sync_courses_from_voomly() -> dict[str, int]:
                 name=name
             )
             created_count += 1
+            
+        # 2. Xóa sạch link web khoá học hiện có và các bản ghi trong bảng CourseLink
+        Course.objects.all().update(web_link="")
+        CourseLink.objects.all().delete()
+        
+        # 3. Lấy trường id khoá học (spotlight_id) trong database để gọi API chi tiết
+        courses_with_id = list(Course.objects.exclude(spotlight_id__isnull=True).exclude(spotlight_id=""))
+        
+        # Helper to fetch customDomain from single spotlight API
+        def fetch_domain(c):
+            import requests
+            detail_url = f"https://api.voomly.com/spotlights/{c.spotlight_id}"
+            try:
+                res = requests.get(detail_url, headers=headers, timeout=15)
+                if res.status_code == 200:
+                    data = res.json()
+                    cd = data.get("customDomain")
+                    if cd:
+                        cd = cd.strip()
+                        if not (cd.startswith("http://") or cd.startswith("https://")):
+                            return c.id, f"https://{cd}"
+                        return c.id, cd
+            except Exception as err:
+                logger.error(f"Error fetching customDomain for course {c.name} ({c.spotlight_id}): {err}")
+            return c.id, ""
+
+        # Fetch customDomain in parallel using ThreadPoolExecutor
+        course_domains = {}
+        with ThreadPoolExecutor(max_workers=15) as executor:
+            futures = {executor.submit(fetch_domain, c): c for c in courses_with_id}
+            for future in as_completed(futures):
+                c_id, web_link = future.result()
+                if web_link:
+                    course_domains[c_id] = web_link
+                    
+        # 4. Cập nhật các web_link thu được vào database
+        with transaction.atomic():
+            for c in courses_with_id:
+                new_link = course_domains.get(c.id, "")
+                if new_link:
+                    c.web_link = new_link
+                    c.save(update_fields=["web_link"])
             
         return {
             "total": len(spotlights),

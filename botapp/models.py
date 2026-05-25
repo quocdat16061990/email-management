@@ -14,11 +14,6 @@ class Course(models.Model):
         return self.name
 
     def save(self, *args, **kwargs):
-        if not self.web_link:
-            slug = slugify(self.name)
-            if not slug:
-                slug = "khoa-hoc"
-            self.web_link = f"https://{slug}.academy.vn"
         super().save(*args, **kwargs)
 
 
