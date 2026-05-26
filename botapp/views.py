@@ -36,6 +36,27 @@ def _base_context() -> dict[str, str]:
     }
 
 
+def _sanitize_sheet_title(title: str, fallback: str = "Sheet") -> str:
+    invalid_chars = ['\\', '/', '*', '?', ':', '[', ']']
+    clean_title = title or fallback
+    for char in invalid_chars:
+        clean_title = clean_title.replace(char, " ")
+    clean_title = " ".join(clean_title.split()).strip()
+    return clean_title[:31] or fallback
+
+
+def _build_unique_sheet_title(title: str, existing_titles: set[str]) -> str:
+    base_title = _sanitize_sheet_title(title)
+    candidate = base_title
+    suffix = 2
+    while candidate in existing_titles:
+        suffix_text = f" ({suffix})"
+        candidate = f"{base_title[: max(0, 31 - len(suffix_text))]}{suffix_text}"
+        suffix += 1
+    existing_titles.add(candidate)
+    return candidate
+
+
 def web_login_required(view_func):
     @wraps(view_func)
     def wrapped(request: HttpRequest, *args, **kwargs):
@@ -279,6 +300,8 @@ def api_dashboard_list(request: HttpRequest) -> JsonResponse:
     page_number = request.GET.get("page", 1)
     sort_by = request.GET.get("sort_by", "created_at").strip()
     sort_order = request.GET.get("sort_order", "desc").strip()
+    course_ids_str = request.GET.get("course_ids", "").strip()
+    status = request.GET.get("status", "").strip()
 
     allowed_sorts = {
         "full_name": Lower("full_name"),
@@ -303,6 +326,19 @@ def api_dashboard_list(request: HttpRequest) -> JsonResponse:
     qs = Customer.objects.prefetch_related("enrollments__course").order_by(*order_by_args)
     if query:
         qs = qs.filter(Q(full_name__icontains=query) | Q(customer_email__icontains=query) | Q(phone_number__icontains=query))
+
+    if course_ids_str:
+        try:
+            course_ids = [int(x.strip()) for x in course_ids_str.split(",") if x.strip()]
+            if course_ids:
+                qs = qs.filter(enrollments__course_id__in=course_ids)
+        except ValueError:
+            pass
+
+    if status and status != "ALL":
+        qs = qs.filter(status=status)
+
+    qs = qs.distinct()
 
     paginator = Paginator(qs, 10)
     page_obj = paginator.get_page(page_number)
@@ -343,6 +379,342 @@ def api_dashboard_list(request: HttpRequest) -> JsonResponse:
         },
         "operator_email": request.session.get("operator_email", ""),
     })
+
+
+@api_login_required
+def api_export_students(request: HttpRequest) -> HttpResponse:
+    student_ids_str = request.GET.get("student_ids", "").strip()
+    course_ids_str = request.GET.get("course_ids", "").strip()
+    status = request.GET.get("status", "").strip()
+    query = request.GET.get("q", "").strip()
+    export_type = request.GET.get("export_type", "simple").strip()
+
+    qs = Customer.objects.prefetch_related("enrollments__course").order_by("-created_at")
+
+    if student_ids_str:
+        try:
+            student_ids = [int(x.strip()) for x in student_ids_str.split(",") if x.strip()]
+            if student_ids:
+                qs = qs.filter(id__in=student_ids)
+        except ValueError:
+            pass
+    else:
+        if query:
+            qs = qs.filter(
+                Q(full_name__icontains=query) |
+                Q(customer_email__icontains=query) |
+                Q(phone_number__icontains=query)
+            )
+        if course_ids_str:
+            try:
+                course_ids = [int(x.strip()) for x in course_ids_str.split(",") if x.strip()]
+                if course_ids:
+                    qs = qs.filter(enrollments__course_id__in=course_ids)
+            except ValueError:
+                pass
+        if status and status != "ALL":
+            qs = qs.filter(status=status)
+
+    qs = qs.distinct()
+
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Danh sách học viên"
+    ws.views.sheetView[0].showGridLines = True
+
+    header_fill = PatternFill(start_color="10B981", end_color="10B981", fill_type="solid")
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    data_font = Font(name="Calibri", size=11)
+    title_font = Font(name="Calibri", size=16, bold=True, color="047857")
+    meta_font = Font(name="Calibri", size=10, italic=True)
+
+    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    thin_border = Border(
+        left=Side(style='thin', color='E5E7EB'),
+        right=Side(style='thin', color='E5E7EB'),
+        top=Side(style='thin', color='E5E7EB'),
+        bottom=Side(style='thin', color='E5E7EB')
+    )
+
+    ws.merge_cells("A1:H1" if export_type == "full" else "A1:C1")
+    ws["A1"] = "DANH SÁCH HỌC VIÊN"
+    ws["A1"].font = title_font
+    ws["A1"].alignment = left_align
+    ws.row_dimensions[1].height = 30
+
+    ws.merge_cells("A2:H2" if export_type == "full" else "A2:C2")
+    ws["A2"] = f"Ngày xuất file: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} | Số lượng: {qs.count()} học viên"
+    ws["A2"].font = meta_font
+    ws["A2"].alignment = left_align
+    ws.row_dimensions[2].height = 20
+
+    ws.row_dimensions[3].height = 10
+
+    if export_type == "full":
+        headers = ["STT", "Họ và Tên", "Email", "Số điện thoại", "Trạng thái", "Ngày đăng ký", "Ngày hết hạn", "Khóa học đã đăng ký"]
+    else:
+        headers = ["STT", "Họ và Tên", "Email"]
+
+    header_row_idx = 4
+    ws.row_dimensions[header_row_idx].height = 25
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=header_row_idx, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center_align
+        cell.border = thin_border
+
+    current_row = 5
+    for idx, s in enumerate(qs, 1):
+        ws.row_dimensions[current_row].height = 20
+        row_data = []
+        if export_type == "full":
+            course_names = ", ".join([e.course.name for e in s.enrollments.all()])
+            status_text = "Hoạt động" if s.status == "ACTIVE" else "Chờ xử lý" if s.status == "PENDING" else "Hết hạn"
+            row_data = [
+                idx,
+                s.full_name or "-",
+                s.customer_email,
+                s.phone_number or "-",
+                status_text,
+                s.registration_date.strftime("%d/%m/%Y") if s.registration_date else "-",
+                s.expiry_date.strftime("%d/%m/%Y") if s.expiry_date else "-",
+                course_names or "-"
+            ]
+        else:
+            row_data = [
+                idx,
+                s.full_name or "-",
+                s.customer_email
+            ]
+
+        for col_idx, value in enumerate(row_data, 1):
+            cell = ws.cell(row=current_row, column=col_idx, value=value)
+            cell.font = data_font
+            cell.border = thin_border
+            if col_idx == 1:
+                cell.alignment = center_align
+            elif export_type == "full" and col_idx in [4, 5, 6, 7]:
+                cell.alignment = center_align
+            else:
+                cell.alignment = left_align
+
+        current_row += 1
+
+    for col in ws.columns:
+        max_len = 0
+        col_letter = get_column_letter(col[0].column)
+        for cell in col:
+            if cell.row in [1, 2, 3]:
+                continue
+            if cell.value:
+                max_len = max(max_len, len(str(cell.value)))
+        ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
+
+    if export_type == "full":
+        ws.column_dimensions["A"].width = 6
+        ws.column_dimensions["B"].width = 25
+        ws.column_dimensions["C"].width = 30
+        ws.column_dimensions["D"].width = 15
+        ws.column_dimensions["E"].width = 15
+        ws.column_dimensions["F"].width = 15
+        ws.column_dimensions["G"].width = 15
+        ws.column_dimensions["H"].width = 40
+    else:
+        ws.column_dimensions["A"].width = 6
+        ws.column_dimensions["B"].width = 25
+        ws.column_dimensions["C"].width = 30
+
+    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    filename = f"danh_sach_hoc_vien_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    wb.save(response)
+    return response
+
+
+@api_login_required
+def api_export_courses(request: HttpRequest) -> HttpResponse:
+    course_ids_str = request.GET.get("course_ids", "").strip()
+    query = request.GET.get("q", "").strip()
+
+    qs = Course.objects.annotate(student_count=Count("customers")).prefetch_related(
+        "enrollments__customer"
+    ).order_by(Lower("name"), "id")
+
+    if course_ids_str:
+        try:
+            course_ids = [int(x.strip()) for x in course_ids_str.split(",") if x.strip()]
+            if course_ids:
+                qs = qs.filter(id__in=course_ids)
+        except ValueError:
+            pass
+
+    if query:
+        qs = qs.filter(name__icontains=query)
+
+    courses = list(qs.distinct())
+
+    import openpyxl
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    wb = openpyxl.Workbook()
+    summary_ws = wb.active
+    summary_ws.title = "Tong hop khoa hoc"
+    summary_ws.views.sheetView[0].showGridLines = True
+
+    header_fill = PatternFill(start_color="10B981", end_color="10B981", fill_type="solid")
+    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+    data_font = Font(name="Calibri", size=11)
+    title_font = Font(name="Calibri", size=16, bold=True, color="047857")
+    meta_font = Font(name="Calibri", size=10, italic=True)
+
+    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
+
+    thin_border = Border(
+        left=Side(style="thin", color="E5E7EB"),
+        right=Side(style="thin", color="E5E7EB"),
+        top=Side(style="thin", color="E5E7EB"),
+        bottom=Side(style="thin", color="E5E7EB"),
+    )
+
+    summary_ws.merge_cells("A1:E1")
+    summary_ws["A1"] = "DANH SACH KHOA HOC"
+    summary_ws["A1"].font = title_font
+    summary_ws["A1"].alignment = left_align
+    summary_ws.row_dimensions[1].height = 30
+
+    summary_ws.merge_cells("A2:E2")
+    summary_ws["A2"] = (
+        f"Ngay xuat file: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} | "
+        f"So luong khoa hoc: {len(courses)}"
+    )
+    summary_ws["A2"].font = meta_font
+    summary_ws["A2"].alignment = left_align
+    summary_ws.row_dimensions[2].height = 20
+    summary_ws.row_dimensions[3].height = 10
+
+    summary_headers = ["STT", "Khoa hoc", "So hoc vien", "Website", "Ngay tao"]
+    for col_idx, header in enumerate(summary_headers, 1):
+        cell = summary_ws.cell(row=4, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = center_align
+        cell.border = thin_border
+
+    for row_idx, course in enumerate(courses, 5):
+        row_data = [
+            row_idx - 4,
+            course.name,
+            course.student_count or 0,
+            course.web_link or "-",
+            course.created_at.strftime("%d/%m/%Y"),
+        ]
+        for col_idx, value in enumerate(row_data, 1):
+            cell = summary_ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.font = data_font
+            cell.border = thin_border
+            cell.alignment = center_align if col_idx in [1, 3, 5] else left_align
+
+    summary_ws.column_dimensions["A"].width = 6
+    summary_ws.column_dimensions["B"].width = 35
+    summary_ws.column_dimensions["C"].width = 14
+    summary_ws.column_dimensions["D"].width = 42
+    summary_ws.column_dimensions["E"].width = 14
+
+    existing_titles = {summary_ws.title}
+    student_headers = [
+        "STT",
+        "Ho va ten",
+        "Email",
+        "So dien thoai",
+        "Trang thai",
+        "Ngay dang ky",
+        "Ngay het han",
+    ]
+
+    for course in courses:
+        course_ws = wb.create_sheet(title=_build_unique_sheet_title(course.name, existing_titles))
+        course_ws.views.sheetView[0].showGridLines = True
+
+        enrollments = list(
+            course.enrollments.select_related("customer").order_by(
+                Lower("customer__full_name"),
+                Lower("customer__customer_email"),
+                "id",
+            )
+        )
+
+        course_ws.merge_cells("A1:G1")
+        course_ws["A1"] = course.name
+        course_ws["A1"].font = title_font
+        course_ws["A1"].alignment = left_align
+        course_ws.row_dimensions[1].height = 30
+
+        course_ws.merge_cells("A2:G2")
+        course_ws["A2"] = (
+            f"So hoc vien: {len(enrollments)}"
+            + (f" | Website: {course.web_link}" if course.web_link else "")
+        )
+        course_ws["A2"].font = meta_font
+        course_ws["A2"].alignment = left_align
+        course_ws.row_dimensions[2].height = 20
+        course_ws.row_dimensions[3].height = 10
+
+        for col_idx, header in enumerate(student_headers, 1):
+            cell = course_ws.cell(row=4, column=col_idx, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_align
+            cell.border = thin_border
+
+        current_row = 5
+        for idx, enrollment in enumerate(enrollments, 1):
+            student = enrollment.customer
+            status_text = (
+                "Hoat dong"
+                if enrollment.status == "ACTIVE"
+                else "Cho xu ly"
+                if enrollment.status == "PENDING"
+                else "Het han"
+            )
+            row_data = [
+                idx,
+                student.full_name or "-",
+                student.customer_email,
+                student.phone_number or "-",
+                status_text,
+                enrollment.registration_date.strftime("%d/%m/%Y") if enrollment.registration_date else "-",
+                enrollment.expiry_date.strftime("%d/%m/%Y") if enrollment.expiry_date else "-",
+            ]
+            for col_idx, value in enumerate(row_data, 1):
+                cell = course_ws.cell(row=current_row, column=col_idx, value=value)
+                cell.font = data_font
+                cell.border = thin_border
+                cell.alignment = center_align if col_idx in [1, 4, 5, 6, 7] else left_align
+            current_row += 1
+
+        course_ws.column_dimensions["A"].width = 6
+        course_ws.column_dimensions["B"].width = 25
+        course_ws.column_dimensions["C"].width = 30
+        course_ws.column_dimensions["D"].width = 15
+        course_ws.column_dimensions["E"].width = 15
+        course_ws.column_dimensions["F"].width = 15
+        course_ws.column_dimensions["G"].width = 15
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    filename = f"danh_sach_khoa_hoc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    wb.save(response)
+    return response
 
 
 @csrf_exempt
@@ -498,7 +870,7 @@ def api_dashboard_stats(request: HttpRequest) -> JsonResponse:
 
 @api_login_required
 def api_courses_list(request: HttpRequest) -> JsonResponse:
-    page_number = request.GET.get("page", 1)
+    all_courses = request.GET.get("all", "false").lower() == "true"
     sort_by = request.GET.get("sort_by", "created_at").strip()
     sort_order = request.GET.get("sort_order", "desc").strip()
 
@@ -520,6 +892,35 @@ def api_courses_list(request: HttpRequest) -> JsonResponse:
             order_by_args = [sort_field.asc(), "-id"]
 
     qs = Course.objects.annotate(student_count=Count("customers")).order_by(*order_by_args)
+
+    query = request.GET.get("q", "").strip()
+    if query:
+        qs = qs.filter(name__icontains=query)
+
+    if all_courses:
+        courses_data = []
+        for c in qs:
+            courses_data.append({
+                "id": c.id,
+                "name": c.name,
+                "spotlight_id": c.spotlight_id or "",
+                "description": c.description or "",
+                "web_link": c.web_link or "",
+                "student_count": c.student_count,
+                "created_at": c.created_at.isoformat(),
+            })
+        return JsonResponse({
+            "courses": courses_data,
+            "pagination": {
+                "current_page": 1,
+                "total_pages": 1,
+                "has_next": False,
+                "has_prev": False,
+                "total_count": len(courses_data),
+            },
+        })
+
+    page_number = request.GET.get("page", 1)
     paginator = Paginator(qs, 10)
     page_obj = paginator.get_page(page_number)
 

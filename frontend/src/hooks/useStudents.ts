@@ -7,12 +7,20 @@ import {
   deleteStudent,
   syncStudents,
   searchStudents,
+  exportStudents,
   type CreateStudentInput,
 } from '../api/students'
 import type { StudentSearchResult } from '../types/student'
 import type { Pagination } from '../types/api'
 
-export function useStudentList(params: { q?: string; page?: number; sort_by?: string; sort_order?: 'asc' | 'desc' }) {
+export function useStudentList(params: {
+  q?: string
+  page?: number
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
+  course_ids?: string
+  status?: string
+}) {
   return useQuery({
     queryKey: ['students', params],
     queryFn: () => fetchStudentList(params),
@@ -77,5 +85,17 @@ export function useSyncStudents() {
       qc.invalidateQueries({ queryKey: ['students'] })
       qc.invalidateQueries({ queryKey: ['dashboard-stats'] })
     },
+  })
+}
+
+export function useExportStudents() {
+  return useMutation({
+    mutationFn: (params: {
+      student_ids?: string
+      course_ids?: string
+      status?: string
+      q?: string
+      export_type: 'simple' | 'full'
+    }) => exportStudents(params),
   })
 }

@@ -17,12 +17,14 @@ from telegram.ext import (
 )
 
 from .keyboards import (
+    admin_course_selection_keyboard,
     course_list_keyboard,
     enrollment_keyboard,
     main_menu_keyboard,
     restart_keyboard,
 )
 from .services import (
+    assign_courses_to_customer_from_admin,
     create_or_update_customer,
     extract_otp_from_openai_email,
     is_valid_email,
@@ -38,12 +40,46 @@ logger = logging.getLogger(__name__)
 
 ASK_EMAIL = 0
 ASK_OTP = 1
+ASK_ADMIN_NEW_EMAIL = 2
+ASK_ADMIN_COURSES = 3
+ASK_ADMIN_NEW_NAME = 4
+ASK_ADMIN_NEW_PHONE = 5
 
 ENROLLMENT_STATUS_LABELS = {
     "ACTIVE": "✅ Đang hoạt động",
     "PENDING": "⏳ Chờ xử lý",
     "EXPIRED": "❌ Đã hết hạn",
 }
+
+
+def escape_markdown(text: str) -> str:
+    if not text:
+        return ""
+    for char in ["_", "*", "`", "["]:
+        text = text.replace(char, f"\\{char}")
+    return text
+
+
+def _is_admin_customer(customer) -> bool:
+    admin_email = (getattr(settings, "EMAIL_ADMIN", "") or "").strip().lower()
+    if not admin_email or not customer:
+        return False
+    return (customer.customer_email or "").strip().lower() == admin_email
+
+
+def _menu_for_customer(customer):
+    return main_menu_keyboard(is_admin=_is_admin_customer(customer))
+
+
+def _admin_course_prompt(email_text: str, name_text: str, phone_text: str, selected_ids: list[int], total_courses: int) -> str:
+    return (
+        "➕ *Thêm người mới*\n\n"
+        f"📧 Email: `{email_text}`\n"
+        f"👤 Họ tên: *{escape_markdown(name_text)}*\n"
+        f"📞 SĐT: `{phone_text}`\n"
+        f"📚 Đã chọn: *{len(selected_ids)} / {total_courses}* khóa học\n\n"
+        "Bấm vào khóa học để chọn hoặc bỏ chọn, rồi nhấn *Xác nhận*."
+    )
 
 
 # ─── /start ──────────────────────────────────────────────────────────────────
@@ -58,12 +94,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if customer:
         enrollments = await sync_to_async(list)(customer.enrollments.select_related("course").all())
         course_count = len(enrollments)
+        role_line = "\n👑 Vai trò: **ADMIN**" if _is_admin_customer(customer) else ""
         await update.message.reply_text(
-            f"🎓 *Xin chào {customer.full_name or 'bạn'}!*\n\n"
+            f"🎓 *Xin chào {escape_markdown(customer.full_name) or 'bạn'}!*{role_line}\n\n"
             f"📧 `{customer.customer_email}`\n"
             f"📚 *{course_count}* khóa học đang theo dõi\n\n"
             f"Tôi có thể giúp gì cho bạn hôm nay? 👇",
-            reply_markup=main_menu_keyboard(),
+            reply_markup=_menu_for_customer(customer),
             parse_mode="Markdown",
         )
         return ConversationHandler.END
@@ -100,7 +137,7 @@ async def my_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (
         f"👤 *Thông tin của bạn*\n\n"
         f"📧 *Email:* `{customer.customer_email}`\n"
-        f"👤 *Họ tên:* {customer.full_name or 'Chưa cập nhật'}\n"
+        f"👤 *Họ tên:* {escape_markdown(customer.full_name) or 'Chưa cập nhật'}\n"
         f"📞 *SĐT:* {customer.phone_number or 'Chưa cập nhật'}\n"
         f"🔄 *Trạng thái:* {status_vi}\n"
         f"🤖 *Telegram:* {telegram_status}\n"
@@ -109,9 +146,9 @@ async def my_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text(text, reply_markup=main_menu_keyboard(), parse_mode="Markdown")
+        await update.callback_query.edit_message_text(text, reply_markup=_menu_for_customer(customer), parse_mode="Markdown")
     else:
-        await update.message.reply_text(text, reply_markup=main_menu_keyboard(), parse_mode="Markdown")
+        await update.message.reply_text(text, reply_markup=_menu_for_customer(customer), parse_mode="Markdown")
 
 
 # ─── /courses ────────────────────────────────────────────────────────────────
@@ -128,9 +165,9 @@ async def my_courses(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         text = "📚 Bạn chưa đăng ký khóa học nào."
         if update.callback_query:
             await update.callback_query.answer()
-            await update.callback_query.edit_message_text(text, reply_markup=main_menu_keyboard())
+            await update.callback_query.edit_message_text(text, reply_markup=_menu_for_customer(customer))
         else:
-            await update.message.reply_text(text, reply_markup=main_menu_keyboard())
+            await update.message.reply_text(text, reply_markup=_menu_for_customer(customer))
         return
 
     course_data = [
@@ -186,8 +223,8 @@ async def course_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             remaining = f"❌ Quá hạn *{abs(days)}* ngày"
 
     text = (
-        f"📖 *{course.name}*\n\n"
-        f"📝 *Mô tả:* {course.description or 'Chưa có mô tả'}\n"
+        f"📖 *{escape_markdown(course.name)}*\n\n"
+        f"📝 *Mô tả:* {escape_markdown(course.description) or 'Chưa có mô tả'}\n"
         f"📅 *Đăng ký:* {enrollment.registration_date or 'N/A'}\n"
         f"📅 *Hết hạn:* {enrollment.expiry_date or 'N/A'}\n"
         f"📊 *Trạng thái:* {ENROLLMENT_STATUS_LABELS.get(enrollment.status, enrollment.status)}\n"
@@ -333,7 +370,7 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if courses_list:
         max_display = 5
         displayed_courses = courses_list[:max_display]
-        assigned_courses = "\n".join(f"• 📖 {c.name}" for c in displayed_courses)
+        assigned_courses = "\n".join(f"• 📖 {escape_markdown(c.name)}" for c in displayed_courses)
         if len(courses_list) > max_display:
             assigned_courses += f"\n• ➕ _và {len(courses_list) - max_display} khóa học khác..._"
     else:
@@ -346,7 +383,7 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         f"📞 SĐT: {customer.phone_number or 'Chưa có SĐT'}\n"
         f"📚 Khóa học của bạn:\n{assigned_courses}\n\n"
         f"Bây giờ bạn đã có thể sử dụng menu bên dưới.",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=_menu_for_customer(customer),
         parse_mode="Markdown",
     )
     return ConversationHandler.END
@@ -374,6 +411,7 @@ async def fetch_openai_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             )
             return
 
+    context.user_data.setdefault("otp_session_started_at", time.time())
     await query.edit_message_text("🔍 *Đang quét Gmail để tìm OTP OpenAI...*\nVui lòng đợi trong giây lát.", parse_mode="Markdown")
     try:
         otp_code = await sync_to_async(extract_otp_from_openai_email)(
@@ -399,10 +437,9 @@ async def fetch_openai_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     await sync_to_async(mark_customer_otp_received)(query.message.chat_id, email_text)
     await query.edit_message_text(
-        f"✅ *Tìm thấy OTP!*\n\n"
         f"🔑 Mã OTP của bạn là: `{otp_code}`\n\n"
         f"Xong rồi! Cảm ơn bạn.",
-        reply_markup=main_menu_keyboard(),
+        reply_markup=_menu_for_customer(await _find_customer_by_chat_id(query.message.chat_id)),
         parse_mode="Markdown",
     )
     context.user_data.clear()
@@ -434,7 +471,7 @@ async def lookup_customer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     enrollments = await sync_to_async(list)(customer.enrollments.select_related("course").all())
     course_block = "\n".join(
-        f"• {e.course.name} — {ENROLLMENT_STATUS_LABELS.get(e.status, e.status)}"
+        f"• {escape_markdown(e.course.name)} — {ENROLLMENT_STATUS_LABELS.get(e.status, e.status)}"
         for e in enrollments
     ) if enrollments else "Chưa có khóa học"
 
@@ -447,7 +484,7 @@ async def lookup_customer(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     text = (
         f"👤 *Kết quả tra cứu*\n\n"
         f"📧 *Email:* `{customer.customer_email}`\n"
-        f"👤 *Họ tên:* {customer.full_name or 'Chưa cập nhật'}\n"
+        f"👤 *Họ tên:* {escape_markdown(customer.full_name) or 'Chưa cập nhật'}\n"
         f"📞 *SĐT:* {customer.phone_number or 'Chưa cập nhật'}\n"
         f"📊 *Trạng thái:* {status_vi}\n"
         f"🤖 *Telegram:* {telegram_value}\n\n"
@@ -475,14 +512,325 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "━━━━━━━━━━━━━━━━━━\n"
         "_💡 Mẹo: Sau khi nhập email, bạn có thể dùng menu để thao tác nhanh hơn!_"
     )
+    customer = await _find_customer_by_chat_id(update.effective_chat.id)
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.edit_message_text(text, reply_markup=main_menu_keyboard(), parse_mode="Markdown")
+        await update.callback_query.edit_message_text(text, reply_markup=_menu_for_customer(customer), parse_mode="Markdown")
     else:
-        await update.message.reply_text(text, reply_markup=main_menu_keyboard(), parse_mode="Markdown")
+        await update.message.reply_text(text, reply_markup=_menu_for_customer(customer), parse_mode="Markdown")
 
 
 # ─── /otp ────────────────────────────────────────────────────────────────────
+
+async def admin_add_user_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    customer = await _find_customer_by_chat_id(update.effective_chat.id)
+    if not _is_admin_customer(customer):
+        text = "❌ Bạn không có quyền dùng tính năng này."
+        if update.callback_query:
+            await update.callback_query.answer()
+            await update.callback_query.edit_message_text(text, reply_markup=_menu_for_customer(customer))
+        else:
+            await update.message.reply_text(text, reply_markup=_menu_for_customer(customer))
+        return ConversationHandler.END
+
+    context.user_data["admin_add_mode"] = True
+    prompt = (
+        "➕ *Thêm người mới*\n\n"
+        "Nhập email học viên cần thêm.\n"
+        "Ví dụ: `quocdattranhuu1606@gmail.com`"
+    )
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.edit_message_text(prompt, reply_markup=restart_keyboard(), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(prompt, reply_markup=restart_keyboard(), parse_mode="Markdown")
+    return ASK_ADMIN_NEW_EMAIL
+
+
+async def handle_admin_add_email(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    customer = await _find_customer_by_chat_id(update.effective_chat.id)
+    if not _is_admin_customer(customer):
+        context.user_data.pop("admin_add_mode", None)
+        await update.message.reply_text("❌ Bạn không có quyền dùng tính năng này.")
+        return ConversationHandler.END
+
+    email_text = update.message.text.strip().lower()
+    if not is_valid_email(email_text):
+        await update.message.reply_text(
+            "❌ Email không hợp lệ. Vui lòng nhập lại email học viên.",
+            reply_markup=restart_keyboard(),
+        )
+        return ASK_ADMIN_NEW_EMAIL
+
+    context.user_data["admin_new_email"] = email_text
+    await update.message.reply_text(
+        "➕ *Thêm người mới*\n\n"
+        f"📧 Email: `{email_text}`\n\n"
+        "Vui lòng nhập *Họ tên* của học viên:",
+        reply_markup=restart_keyboard(),
+        parse_mode="Markdown",
+    )
+    return ASK_ADMIN_NEW_NAME
+
+
+async def handle_admin_add_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    customer = await _find_customer_by_chat_id(update.effective_chat.id)
+    if not _is_admin_customer(customer):
+        context.user_data.clear()
+        await update.message.reply_text("❌ Bạn không có quyền dùng tính năng này.")
+        return ConversationHandler.END
+
+    name_text = update.message.text.strip()
+    if not name_text:
+        await update.message.reply_text(
+            "❌ Họ tên không được để trống. Vui lòng nhập lại Họ tên học viên.",
+            reply_markup=restart_keyboard(),
+        )
+        return ASK_ADMIN_NEW_NAME
+
+    context.user_data["admin_new_name"] = name_text
+    email_text = context.user_data.get("admin_new_email")
+    await update.message.reply_text(
+        "➕ *Thêm người mới*\n\n"
+        f"📧 Email: `{email_text}`\n"
+        f"👤 Họ tên: *{name_text}*\n\n"
+        "Vui lòng nhập *Số điện thoại* của học viên:",
+        reply_markup=restart_keyboard(),
+        parse_mode="Markdown",
+    )
+    return ASK_ADMIN_NEW_PHONE
+
+
+async def handle_admin_add_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    customer = await _find_customer_by_chat_id(update.effective_chat.id)
+    if not _is_admin_customer(customer):
+        context.user_data.clear()
+        await update.message.reply_text("❌ Bạn không có quyền dùng tính năng này.")
+        return ConversationHandler.END
+
+    phone_text = update.message.text.strip()
+    if not phone_text:
+        await update.message.reply_text(
+            "❌ Số điện thoại không được để trống. Vui lòng nhập lại Số điện thoại học viên.",
+            reply_markup=restart_keyboard(),
+        )
+        return ASK_ADMIN_NEW_PHONE
+
+    context.user_data["admin_new_phone"] = phone_text
+    email_text = context.user_data.get("admin_new_email")
+    name_text = context.user_data.get("admin_new_name")
+
+    courses = await sync_to_async(list_available_courses)()
+    if not courses:
+        await update.message.reply_text(
+            "❌ Chưa có khóa học nào trong hệ thống để gán cho học viên.",
+            reply_markup=_menu_for_customer(customer),
+        )
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    context.user_data["admin_selected_course_ids"] = []
+    context.user_data["admin_course_page"] = 0
+    await update.message.reply_text(
+        _admin_course_prompt(email_text, name_text, phone_text, [], len(courses)),
+        reply_markup=admin_course_selection_keyboard(courses, [], page=0),
+        parse_mode="Markdown",
+    )
+    return ASK_ADMIN_COURSES
+
+
+async def admin_course_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    customer = await _find_customer_by_chat_id(update.effective_chat.id)
+    if not _is_admin_customer(customer):
+        await query.edit_message_text("❌ Bạn không có quyền dùng tính năng này.")
+        return ConversationHandler.END
+
+    email_text = context.user_data.get("admin_new_email")
+    name_text = context.user_data.get("admin_new_name")
+    phone_text = context.user_data.get("admin_new_phone")
+    if not email_text:
+        await query.edit_message_text("❌ Phiên thêm người mới không còn hợp lệ.", reply_markup=_menu_for_customer(customer))
+        return ConversationHandler.END
+
+    course_id = int(query.data.rsplit("_", 1)[1])
+    selected_ids = set(context.user_data.get("admin_selected_course_ids", []))
+    if course_id in selected_ids:
+        selected_ids.remove(course_id)
+    else:
+        selected_ids.add(course_id)
+
+    selected_list = sorted(selected_ids)
+    context.user_data["admin_selected_course_ids"] = selected_list
+    page = context.user_data.get("admin_course_page", 0)
+    courses = await sync_to_async(list_available_courses)()
+    await query.edit_message_text(
+        _admin_course_prompt(email_text, name_text, phone_text, selected_list, len(courses)),
+        reply_markup=admin_course_selection_keyboard(courses, selected_list, page=page),
+        parse_mode="Markdown",
+    )
+    return ASK_ADMIN_COURSES
+
+
+async def admin_course_page_change(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    customer = await _find_customer_by_chat_id(update.effective_chat.id)
+    if not _is_admin_customer(customer):
+        await query.edit_message_text("❌ Bạn không có quyền dùng tính năng này.")
+        return ConversationHandler.END
+
+    email_text = context.user_data.get("admin_new_email")
+    name_text = context.user_data.get("admin_new_name")
+    phone_text = context.user_data.get("admin_new_phone")
+    if not email_text:
+        await query.edit_message_text("❌ Phiên thêm người mới không còn hợp lệ.", reply_markup=_menu_for_customer(customer))
+        return ConversationHandler.END
+
+    page = int(query.data.split("_")[3])
+    context.user_data["admin_course_page"] = page
+    selected_list = context.user_data.get("admin_selected_course_ids", [])
+    courses = await sync_to_async(list_available_courses)()
+    await query.edit_message_text(
+        _admin_course_prompt(email_text, name_text, phone_text, selected_list, len(courses)),
+        reply_markup=admin_course_selection_keyboard(courses, selected_list, page=page),
+        parse_mode="Markdown",
+    )
+    return ASK_ADMIN_COURSES
+
+
+async def admin_course_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    customer = await _find_customer_by_chat_id(update.effective_chat.id)
+    if not _is_admin_customer(customer):
+        await query.answer("Bạn không có quyền dùng tính năng này.", show_alert=True)
+        return ConversationHandler.END
+
+    email_text = context.user_data.get("admin_new_email")
+    name_text = context.user_data.get("admin_new_name")
+    phone_text = context.user_data.get("admin_new_phone")
+    selected_ids = context.user_data.get("admin_selected_course_ids", [])
+    if not email_text:
+        await query.answer("Phiên thêm người mới không còn hợp lệ.", show_alert=True)
+        return ConversationHandler.END
+    if not selected_ids:
+        await query.answer("Chọn ít nhất 1 khóa học trước khi xác nhận.", show_alert=True)
+        return ASK_ADMIN_COURSES
+
+    await query.answer()
+    
+    # 1. Loading 0%
+    await query.edit_message_text(
+        "⏳ *Đang tiến hành tạo học viên... (0%)*",
+        parse_mode="Markdown",
+    )
+    
+    # 2. Save student and local enrollments (do NOT sync to voomly inside this call)
+    saved_customer, created = await sync_to_async(assign_courses_to_customer_from_admin)(
+        email_text,
+        selected_ids,
+        full_name=name_text,
+        phone_number=phone_text,
+        sync_to_voomly=False,
+    )
+    
+    # 3. Find courses that need sync
+    from botapp.models import Course
+    courses_to_sync = []
+    for c_id in selected_ids:
+        c = await sync_to_async(Course.objects.filter(id=c_id).first)()
+        if c and c.spotlight_id:
+            courses_to_sync.append(c)
+            
+    total_sync = len(courses_to_sync)
+    voomly_sync_status = []
+    
+    # 4. Sync each course and update progress
+    from botapp.services import add_student_to_voomly, wait_for_voomly_student
+    for idx, course in enumerate(courses_to_sync):
+        # Calculate percentage
+        percent = int(((idx) / (total_sync + 1)) * 100)
+        await query.edit_message_text(
+            f"⏳ *Đang đồng bộ khóa học {idx+1}/{total_sync}... ({percent}%)*\n"
+            f"📚 Khóa: `{course.name}`",
+            parse_mode="Markdown",
+        )
+        
+        success = await sync_to_async(add_student_to_voomly)(
+            course=course,
+            name=saved_customer.full_name or "Học viên",
+            email=saved_customer.customer_email,
+            phone=saved_customer.phone_number or "",
+        )
+        
+        if success:
+            await sync_to_async(wait_for_voomly_student)(course, saved_customer.customer_email)
+            voomly_sync_status.append((course.name, True))
+        else:
+            voomly_sync_status.append((course.name, False))
+            
+    # Loading 95%
+    await query.edit_message_text(
+        "⏳ *Đang hoàn tất lưu thông tin... (95%)*",
+        parse_mode="Markdown",
+    )
+    
+    # Reload enrollments and build report lines
+    assigned_courses = await sync_to_async(list)(saved_customer.enrollments.select_related("course").all())
+    
+    course_lines = []
+    for enrollment in assigned_courses:
+        c_name = escape_markdown(enrollment.course.name)
+        sync_result = next((status for name, status in voomly_sync_status if name == enrollment.course.name), None)
+        if sync_result is True:
+            status_emoji = "✅ (Đã gửi email)"
+        elif sync_result is False:
+            status_emoji = "❌ (Lỗi gửi email/Voomly)"
+        else:
+            status_emoji = "⚪ (Không cần Voomly)" # No spotlight_id
+        course_lines.append(f"• 📘 {c_name}: {status_emoji}")
+        
+    course_block = "\n".join(course_lines)
+    action_text = "Đã thêm mới" if created else "Đã cập nhật"
+    
+    context.user_data.pop("admin_add_mode", None)
+    context.user_data.pop("admin_new_email", None)
+    context.user_data.pop("admin_new_name", None)
+    context.user_data.pop("admin_new_phone", None)
+    context.user_data.pop("admin_course_page", None)
+    context.user_data.pop("admin_selected_course_ids", None)
+    
+    await query.edit_message_text(
+        f"✅ *{action_text} học viên thành công! (100%)*\n\n"
+        f"📧 `{saved_customer.customer_email}`\n"
+        f"👤 {escape_markdown(saved_customer.full_name) or 'Chưa cập nhật'}\n"
+        f"📞 SĐT: `{saved_customer.phone_number or 'Chưa cập nhật'}`\n"
+        f"🔄 Trạng thái: {ENROLLMENT_STATUS_LABELS.get(saved_customer.status, saved_customer.status)}\n\n"
+        f"📚 *Khóa học đã gán:*\n{course_block}\n\n"
+        "Người này đã được lưu và gửi email kích hoạt từ Voomly (nếu có).",
+        reply_markup=_menu_for_customer(customer),
+        parse_mode="Markdown",
+    )
+    return ConversationHandler.END
+
+
+async def admin_course_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    customer = await _find_customer_by_chat_id(update.effective_chat.id)
+    context.user_data.pop("admin_add_mode", None)
+    context.user_data.pop("admin_new_email", None)
+    context.user_data.pop("admin_new_name", None)
+    context.user_data.pop("admin_new_phone", None)
+    context.user_data.pop("admin_course_page", None)
+    context.user_data.pop("admin_selected_course_ids", None)
+    await query.edit_message_text(
+        "Đã hủy thêm người mới.",
+        reply_markup=_menu_for_customer(customer),
+    )
+    return ConversationHandler.END
+
 
 async def otp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
@@ -512,12 +860,13 @@ async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if customer:
         enrollments = await sync_to_async(list)(customer.enrollments.select_related("course").all())
         course_count = len(enrollments)
+        role_line = "\n👑 Vai trò: **ADMIN**" if _is_admin_customer(customer) else ""
         await query.edit_message_text(
-            f"🎓 *Xin chào {customer.full_name or 'bạn'}!*\n\n"
+            f"🎓 *Xin chào {escape_markdown(customer.full_name) or 'bạn'}!*{role_line}\n\n"
             f"📧 `{customer.customer_email}`\n"
             f"📚 *{course_count}* khóa học đang theo dõi\n\n"
             f"Tôi có thể giúp gì cho bạn hôm nay? 👇",
-            reply_markup=main_menu_keyboard(),
+            reply_markup=_menu_for_customer(customer),
             parse_mode="Markdown",
         )
     else:
@@ -694,7 +1043,43 @@ def build_application() -> Application:
         per_message=False,
     )
 
+    admin_add_conversation_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("adduser", admin_add_user_prompt),
+            CallbackQueryHandler(admin_add_user_prompt, pattern="^admin_add_user$"),
+        ],
+        states={
+            ASK_ADMIN_NEW_EMAIL: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_add_email),
+                CallbackQueryHandler(restart_flow, pattern="^restart_flow$"),
+            ],
+            ASK_ADMIN_NEW_NAME: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_add_name),
+                CallbackQueryHandler(restart_flow, pattern="^restart_flow$"),
+            ],
+            ASK_ADMIN_NEW_PHONE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_add_phone),
+                CallbackQueryHandler(restart_flow, pattern="^restart_flow$"),
+            ],
+            ASK_ADMIN_COURSES: [
+                CallbackQueryHandler(admin_course_toggle, pattern=r"^admin_course_toggle_\d+$"),
+                CallbackQueryHandler(admin_course_page_change, pattern=r"^admin_course_page_\d+$"),
+                CallbackQueryHandler(admin_course_confirm, pattern="^admin_course_confirm$"),
+                CallbackQueryHandler(admin_course_cancel, pattern="^admin_course_cancel$"),
+                CallbackQueryHandler(restart_flow, pattern="^restart_flow$"),
+            ],
+        },
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CommandHandler("start", start),
+        ],
+        per_chat=True,
+        per_user=True,
+        per_message=False,
+    )
+
     application.add_handler(conversation_handler)
+    application.add_handler(admin_add_conversation_handler)
     application.add_handler(CommandHandler("me", my_info))
     application.add_handler(CommandHandler("courses", my_courses))
     application.add_handler(CommandHandler("lookup", lookup_customer))

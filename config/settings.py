@@ -14,6 +14,7 @@ COMPANY_NAME = os.getenv("COMPANY_NAME", "Anhlaptrinh Management")
 COMPANY_LOGO_TEXT = os.getenv("COMPANY_LOGO_TEXT", "AL")
 WEBAPP_LOGIN_EMAIL = os.getenv("WEBAPP_LOGIN_EMAIL", "admin@example.com")
 WEBAPP_LOGIN_PASSWORD = os.getenv("WEBAPP_LOGIN_PASSWORD", "change-me")
+EMAIL_ADMIN = os.getenv("EMAIL_ADMIN", "").strip().lower()
 
 INSTALLED_APPS = [
     "django.contrib.contenttypes",

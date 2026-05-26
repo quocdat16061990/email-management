@@ -1,0 +1,25 @@
+
+echo "=========================================="
+echo " Dang chay kiem thu tu dong (Pre-commit)..."
+echo "=========================================="
+
+# 1. Test Backend Django
+echo "--> Kiem tra Backend Django..."
+python manage.py test botapp
+if [ $? -ne 0 ]; then
+    echo "Loi: Kiem thu Backend that bai! Commit bi huy."
+    exit 1
+fi
+
+# 2. Test Frontend
+echo "--> Kiem tra Frontend React..."
+cd frontend
+npm run test
+if [ $? -ne 0 ]; then
+    echo "Loi: Kiem thu Frontend that bai! Commit bi huy."
+    exit 1
+fi
+cd ..
+
+echo "Tat ca cac kiem tra deu THANH CONG! Commit duoc tao."
+exit 0

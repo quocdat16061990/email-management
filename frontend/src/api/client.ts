@@ -56,3 +56,8 @@ export async function apiDelete<T>(endpoint: string): Promise<T> {
   const response = await api.delete<T>(endpoint)
   return response.data
 }
+
+export async function apiGetBlob(endpoint: string, params?: Record<string, string | number | undefined>): Promise<Blob> {
+  const response = await api.get<Blob>(endpoint, { params, responseType: 'blob' })
+  return response.data
+}

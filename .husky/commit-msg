@@ -1,0 +1,22 @@
+
+commit_msg_file=$1
+commit_msg=$(cat "$commit_msg_file")
+
+# Dinh dang Regex Conventional Commits
+pattern="^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?: .+"
+
+if ! echo "$commit_msg" | grep -Eq "$pattern"; then
+    echo "=========================================================="
+    echo "❌ LOI: Commit message khong hop le!"
+    echo "=========================================================="
+    echo "Commit message phai tuan thu quy tac Conventional Commits."
+    echo "Vi du dung:"
+    echo "  feat: them chuc nang dang ky hoc vien"
+    echo "  fix(bot): sua loi timeout API Voomly"
+    echo "  docs: cap nhat README.md"
+    echo "----------------------------------------------------------"
+    echo "Cac loai commit hop le (types):"
+    echo "  feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert"
+    echo "=========================================================="
+    exit 1
+fi

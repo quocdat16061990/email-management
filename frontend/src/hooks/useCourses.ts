@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tansta
 import {
   fetchCourseList,
   fetchCourseDetail,
+  exportCourses,
   createCourse,
   updateCourse,
   deleteCourse,
@@ -12,7 +13,7 @@ import {
   type EnrollStudentInput,
 } from '../api/courses'
 
-export function useCourseList(params: { page?: number; sort_by?: string; sort_order?: 'asc' | 'desc' }) {
+export function useCourseList(params: { page?: number; sort_by?: string; sort_order?: 'asc' | 'desc'; all?: boolean }) {
   return useQuery({
     queryKey: ['courses', params],
     queryFn: () => fetchCourseList(params),
@@ -25,6 +26,12 @@ export function useCourseDetail(id: number | null) {
     queryKey: ['course', id],
     queryFn: () => fetchCourseDetail(id!),
     enabled: !!id,
+  })
+}
+
+export function useExportCourses() {
+  return useMutation({
+    mutationFn: (params?: { course_ids?: string; q?: string }) => exportCourses(params),
   })
 }
 

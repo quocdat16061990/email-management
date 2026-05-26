@@ -1,4 +1,5 @@
 import email
+import html
 import imaplib
 import logging
 import re
@@ -123,6 +124,100 @@ def get_or_create_customer_for_otp(customer_email: str, otp_code: str) -> Custom
     return customer
 
 
+def create_customer_from_admin(customer_email: str) -> tuple[Customer, bool]:
+    normalized_email = customer_email.strip().lower()
+    customer = Customer.objects.filter(customer_email=normalized_email).first()
+    created = False
+
+    if not customer:
+        customer = Customer.objects.create(
+            customer_email=normalized_email,
+            status="ACTIVE",
+            has_sent_otp=False,
+            is_verified_telegram=False,
+        )
+        profile_data = _build_customer_profile(0, normalized_email)
+        for field_name, value in profile_data.items():
+            setattr(customer, field_name, value)
+        customer.save()
+        created = True
+
+    if not customer.courses.exists():
+        courses = list(Course.objects.filter(name__in=_default_course_names(0, normalized_email)))
+        if courses:
+            customer.courses.set(courses)
+
+    if customer.status != "ACTIVE":
+        customer.status = "ACTIVE"
+        customer.save(update_fields=["status"])
+
+    return customer, created
+
+
+def assign_courses_to_customer_from_admin(
+    customer_email: str,
+    course_ids: list[int],
+    full_name: str = None,
+    phone_number: str = None,
+    sync_to_voomly: bool = True,
+) -> tuple[Customer, bool]:
+    customer, created = create_customer_from_admin(customer_email)
+    
+    # Update full_name and phone_number if they are provided
+    updated_fields = []
+    if full_name:
+        customer.full_name = full_name.strip()
+        updated_fields.append("full_name")
+    if phone_number:
+        customer.phone_number = normalize_phone_number(phone_number)
+        updated_fields.append("phone_number")
+    if updated_fields:
+        customer.save(update_fields=updated_fields)
+
+    normalized_ids = sorted({int(course_id) for course_id in course_ids})
+    today = timezone.localdate()
+    expiry_date = today + timedelta(days=90)
+
+    Enrollment = customer.enrollments.model
+    existing_enrollments = {enrollment.course_id: enrollment for enrollment in customer.enrollments.all()}
+
+    for course_id in normalized_ids:
+        enrollment = existing_enrollments.get(course_id)
+        if enrollment:
+            enrollment.status = "ACTIVE"
+            enrollment.registration_date = enrollment.registration_date or today
+            enrollment.expiry_date = enrollment.expiry_date or expiry_date
+            enrollment.save(update_fields=["status", "registration_date", "expiry_date"])
+        else:
+            Enrollment.objects.create(
+                customer=customer,
+                course_id=course_id,
+                status="ACTIVE",
+                registration_date=today,
+                expiry_date=expiry_date,
+            )
+        
+        # Sync student to Voomly course if spotlight_id is configured (this will automatically send Voomly invitation email)
+        if sync_to_voomly:
+            try:
+                course = Course.objects.get(id=course_id)
+                if course.spotlight_id:
+                    success = add_student_to_voomly(
+                        course=course,
+                        name=customer.full_name or "Học viên",
+                        email=customer.customer_email,
+                        phone=customer.phone_number or "",
+                    )
+                    if success:
+                        wait_for_voomly_student(course, customer.customer_email)
+            except Exception as exc:
+                logger.exception(f"Lỗi khi đồng bộ học viên {customer.customer_email} sang Voomly cho khóa học {course_id}: {exc}")
+
+    Enrollment.objects.filter(customer=customer).exclude(course_id__in=normalized_ids).delete()
+    customer.sync_overall_fields()
+    return customer, created
+
+
 def send_telegram_otp_email(to_email: str, otp_code: str) -> bool:
     try:
         context = {
@@ -219,7 +314,19 @@ def lookup_customer_by_email(customer_email: str) -> Customer | None:
 
 
 def _message_text(msg: email.message.Message) -> str:
+    def _html_to_text(content: str) -> str:
+        cleaned = re.sub(r"<!--.*?-->", " ", content, flags=re.DOTALL)
+        cleaned = re.sub(r"<(script|style|head|title)\b[^>]*>.*?</\1>", " ", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        cleaned = re.sub(r"<br\s*/?>", "\n", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"</(p|div|tr|td|li|h1|h2|h3|h4|h5|h6)>", "\n", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"<[^>]+>", " ", cleaned)
+        cleaned = html.unescape(cleaned)
+        cleaned = re.sub(r"[ \t\r\f\v]+", " ", cleaned)
+        cleaned = re.sub(r"\n\s*\n+", "\n", cleaned)
+        return cleaned.strip()
+
     body = ""
+    html_body = ""
     if msg.is_multipart():
         for subpart in msg.walk():
             content_type = subpart.get_content_type()
@@ -227,10 +334,51 @@ def _message_text(msg: email.message.Message) -> str:
             if content_type == "text/plain" and "attachment" not in disposition.lower():
                 payload = subpart.get_payload(decode=True) or b""
                 body += payload.decode(errors="ignore")
+            elif content_type == "text/html" and "attachment" not in disposition.lower():
+                payload = subpart.get_payload(decode=True) or b""
+                html_body += payload.decode(errors="ignore")
     else:
         payload = msg.get_payload(decode=True) or b""
         body = payload.decode(errors="ignore")
+        if msg.get_content_type() == "text/html":
+            html_body = body
+            body = ""
+    if body.strip():
+        return body
+    if html_body.strip():
+        return _html_to_text(html_body)
     return body
+
+
+def _extract_otp_from_body(body: str) -> str | None:
+    if not body:
+        return None
+
+    prioritized_patterns = [
+        r"(?:mã xác minh tạm thời|ma xac minh tam thoi)[^\d]{0,80}(\d{6})",
+        r"(?:mã xác minh|ma xac minh)[^\d]{0,80}(\d{6})",
+        r"(?:verification code|temporary code)[^\d]{0,80}(\d{6})",
+        r"(?:continue|tiếp tục)[^\d]{0,80}(\d{6})",
+    ]
+    for pattern in prioritized_patterns:
+        match = re.search(pattern, body, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            return match.group(1)
+
+    lines = [line.strip() for line in body.splitlines() if line.strip()]
+    for index, line in enumerate(lines):
+        if re.fullmatch(r"\d{6}", line):
+            nearby = " ".join(lines[max(0, index - 2): min(len(lines), index + 3)]).lower()
+            if any(
+                keyword in nearby
+                for keyword in ["xác minh", "xac minh", "verification", "chatgpt", "openai", "tiếp tục", "continue"]
+            ):
+                return line
+
+    fallback = re.search(r"\b\d{6}\b", body)
+    if fallback:
+        return fallback.group(0)
+    return None
 
 
 def _decode_mime_header(value: str) -> str:
@@ -287,6 +435,10 @@ def extract_otp_from_openai_email(
         min_received_timestamp,
     )
 
+    effective_min_timestamp = min_received_timestamp
+    if effective_min_timestamp is None:
+        effective_min_timestamp = time.time() - 180
+
     while time.time() < deadline:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         try:
@@ -308,6 +460,7 @@ def extract_otp_from_openai_email(
                 time.sleep(interval_seconds)
                 continue
 
+            candidates: list[tuple[float, bytes | str, str, str, str]] = []
             for num in reversed(messages[0].split()):
                 _, msg_data = mail.fetch(num, "(RFC822)")
                 for part in msg_data:
@@ -327,29 +480,48 @@ def extract_otp_from_openai_email(
                     if not _is_openai_otp_email(msg):
                         logger.info("Bo qua mail vi khong khop mau OpenAI OTP.")
                         continue
-                    if min_received_timestamp is not None:
-                        msg_ts = _message_timestamp(msg)
-                        if msg_ts is not None and msg_ts < (min_received_timestamp - 60):
+                    msg_ts = _message_timestamp(msg)
+                    if effective_min_timestamp is not None:
+                        if msg_ts is not None and msg_ts < (effective_min_timestamp - 60):
                             logger.info(
                                 "Bo qua mail vi qua cu. msg_ts=%s min_received_timestamp=%s",
                                 msg_ts,
-                                min_received_timestamp,
+                                effective_min_timestamp,
                             )
                             continue
 
                     body = _message_text(msg)
-                    otp_match = re.search(r"\b\d{6}\b", body)
-                    if otp_match:
-                        mail.store(num, "+FLAGS", "\\Seen")
+                    otp_code = _extract_otp_from_body(body)
+                    if otp_code:
+                        candidates.append((
+                            msg_ts if msg_ts is not None else 0.0,
+                            num,
+                            subject,
+                            date_header,
+                            otp_code,
+                        ))
                         logger.info(
-                            "Tim thay OTP tu mail. seq=%s subject=%s date=%s otp=%s",
+                            "Tim thay OTP candidate. seq=%s subject=%s date=%s otp=%s",
                             num.decode() if isinstance(num, bytes) else str(num),
                             subject,
                             date_header,
-                            otp_match.group(0),
+                            otp_code,
                         )
-                        return otp_match.group(0)
+                        continue
                     logger.info("Mail khop mau OpenAI nhung khong tim thay OTP 6 so.")
+
+            if candidates:
+                latest_ts, latest_num, latest_subject, latest_date, latest_otp = max(candidates, key=lambda item: item[0])
+                mail.store(latest_num, "+FLAGS", "\\Seen")
+                logger.info(
+                    "Chon OTP moi nhat. seq=%s subject=%s date=%s ts=%s otp=%s",
+                    latest_num.decode() if isinstance(latest_num, bytes) else str(latest_num),
+                    latest_subject,
+                    latest_date,
+                    latest_ts,
+                    latest_otp,
+                )
+                return latest_otp
         finally:
             try:
                 mail.logout()
@@ -913,7 +1085,7 @@ def add_student_to_voomly(course: Course, name: str, email: str, phone: str = ""
     }
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         # 200 OK or 201 Created or 403 (with SPOTLIGHT_ACCOUNT_ALREADY_EXISTS code)
         if response.status_code in (200, 201):
             logger.info(f"Successfully registered student {email} to Voomly course {course.name}")

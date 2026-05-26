@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPut, apiDelete } from './client'
+import { apiGet, apiPost, apiPut, apiDelete, apiGetBlob } from './client'
 import type { StudentListItem, Student, StudentSearchResult } from '../types/student'
 import type { Pagination } from '../types/api'
 
@@ -8,8 +8,25 @@ export interface StudentListResponse {
   operator_email: string
 }
 
-export function fetchStudentList(params: { q?: string; page?: number; sort_by?: string; sort_order?: 'asc' | 'desc' }): Promise<StudentListResponse> {
+export function fetchStudentList(params: {
+  q?: string
+  page?: number
+  sort_by?: string
+  sort_order?: 'asc' | 'desc'
+  course_ids?: string
+  status?: string
+}): Promise<StudentListResponse> {
   return apiGet<StudentListResponse>('/api/dashboard/', params as Record<string, string | number | undefined>)
+}
+
+export function exportStudents(params: {
+  student_ids?: string
+  course_ids?: string
+  status?: string
+  q?: string
+  export_type: 'simple' | 'full'
+}): Promise<Blob> {
+  return apiGetBlob('/api/students/export/', params as Record<string, string | number | undefined>)
 }
 
 export function fetchStudentDetail(id: number): Promise<Student> {

@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiPut, apiDelete } from './client'
+import { apiGet, apiPost, apiPut, apiDelete, apiGetBlob } from './client'
 import type { Course, CourseLink, VoomlyStudent } from '../types/course'
 import type { Pagination } from '../types/api'
 import type { Enrollment } from '../types/enrollment'
@@ -8,8 +8,15 @@ export interface CourseListResponse {
   pagination: Pagination
 }
 
-export function fetchCourseList(params: { page?: number; sort_by?: string; sort_order?: 'asc' | 'desc' }): Promise<CourseListResponse> {
+export function fetchCourseList(params: { page?: number; sort_by?: string; sort_order?: 'asc' | 'desc'; all?: boolean }): Promise<CourseListResponse> {
   return apiGet<CourseListResponse>('/api/courses/', params as Record<string, string | number | undefined>)
+}
+
+export function exportCourses(params?: {
+  course_ids?: string
+  q?: string
+}): Promise<Blob> {
+  return apiGetBlob('/api/courses/export/', params as Record<string, string | number | undefined>)
 }
 
 export interface CourseDetailResponse {

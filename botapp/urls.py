@@ -12,6 +12,7 @@ from .views import (
     api_dashboard_stats,
     api_dashboard_update,
     api_enroll_student,
+    api_export_courses,
     api_login,
     api_logout,
     api_student_detail,
@@ -30,6 +31,7 @@ from .views import (
     update_course_website_api,
     student_search_api,
     enroll_student_view,
+    api_export_students,
 )
 
 
@@ -57,6 +59,8 @@ urlpatterns = [
     path("api/dashboard/<int:id>/delete/", api_dashboard_delete, name="api_dashboard_delete"),
     path("api/dashboard/stats/", api_dashboard_stats, name="api_dashboard_stats"),
     path("api/students/<int:id>/", api_student_detail, name="api_student_detail"),
+    path("api/students/export/", api_export_students, name="api_export_students"),
+    path("api/courses/export/", api_export_courses, name="api_export_courses"),
     path("api/courses/", api_courses_list, name="api_courses_list"),
     path("api/courses/create/", api_courses_create, name="api_courses_create"),
     path("api/courses/<int:id>/", api_course_detail_json, name="api_course_detail_json"),

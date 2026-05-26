@@ -30,3 +30,6 @@ frontend/dist/
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# Mobile (Flutter)
+mobile_app/

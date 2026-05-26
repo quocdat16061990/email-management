@@ -17,6 +17,13 @@ echo " KHỞI CHẠY HỆ THỐNG ANHLAPTRINH MANAGEMENT"
 echo "=========================================="
 echo ""
 
+# 0. Cài đặt các thư viện nếu còn thiếu
+echo "-> Đang kiểm tra và cài đặt thư viện Python (Backend)..."
+pip install -r requirements.txt
+echo "-> Đang kiểm tra và cài đặt thư viện NPM (Frontend)..."
+cd frontend && npm install && cd ..
+echo ""
+
 # 1. Khởi chạy Frontend
 echo "[1/3] Đang khởi chạy Frontend (Vite)..."
 cd frontend
@@ -27,7 +34,7 @@ sleep 2 # Đợi 2 giây cho frontend khởi động
 
 # 2. Khởi chạy Backend Django
 echo "[2/3] Đang khởi chạy Backend (Django Server)..."
-python manage.py runserver &
+python manage.py runserver 0.0.0.0:8000 &
 BACKEND_PID=$!
 sleep 2 # Đợi 2 giây cho backend khởi động
 
