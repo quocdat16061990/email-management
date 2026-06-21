@@ -22,6 +22,7 @@ from .keyboards import (
     enrollment_keyboard,
     main_menu_keyboard,
     restart_keyboard,
+    chatgpt_accounts_keyboard,
 )
 from .services import (
     assign_courses_to_customer_from_admin,
@@ -33,6 +34,7 @@ from .services import (
     mark_customer_otp_received,
     get_or_create_customer_for_otp,
     send_telegram_otp_email,
+    extract_otp_from_account_email,
 )
 
 
@@ -65,6 +67,13 @@ def _is_admin_customer(customer) -> bool:
     if not admin_email or not customer:
         return False
     return (customer.customer_email or "").strip().lower() == admin_email
+
+
+def _is_staff_customer(customer) -> bool:
+    if not customer:
+        return False
+    return customer.is_staff or _is_admin_customer(customer)
+
 
 
 def _menu_for_customer(customer):
@@ -848,6 +857,90 @@ async def otp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 
+async def accounts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    chat_id = update.effective_chat.id
+    customer = await _find_customer_by_chat_id(chat_id)
+    if not customer or not _is_staff_customer(customer):
+        await update.message.reply_text("❌ Bạn không có quyền truy cập chức năng này.")
+        return
+
+    from .models import ChatGPTAccount
+    accounts = await sync_to_async(list)(ChatGPTAccount.objects.filter(status="ACTIVE").order_by("email"))
+    if not accounts:
+        await update.message.reply_text("📋 Không có tài khoản ChatGPT Plus nào đang hoạt động.")
+        return
+
+    message_text = "📋 *Danh sách tài khoản ChatGPT Plus:*\n\n"
+    for idx, acc in enumerate(accounts, 1):
+        message_text += f"{idx}️⃣ *Tài khoản:* `{acc.email}`\n🔑 *Mật khẩu:* `{acc.password}`\n\n"
+    message_text += "👉 Chọn nút dưới đây để lấy mã OTP tương ứng sau khi yêu cầu gửi mã từ OpenAI."
+
+    await update.message.reply_text(
+        message_text,
+        reply_markup=chatgpt_accounts_keyboard(accounts),
+        parse_mode="Markdown",
+    )
+
+
+async def fetch_chatgpt_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    chat_id = update.effective_chat.id
+    customer = await _find_customer_by_chat_id(chat_id)
+    if not customer or not _is_staff_customer(customer):
+        await query.edit_message_text("❌ Bạn không có quyền truy cập chức năng này.")
+        return
+
+    # Extract account ID
+    acc_id = int(query.data.split("_")[3])
+
+    from .models import ChatGPTAccount
+    account = await sync_to_async(ChatGPTAccount.objects.filter(id=acc_id).first)()
+    if not account:
+        await query.edit_message_text("❌ Không tìm thấy thông tin tài khoản ChatGPT này.")
+        return
+
+    await query.edit_message_text(
+        f"🔍 *Đang quét Gmail của `{account.email}` để tìm OTP OpenAI...*\nVui lòng đợi trong giây lát.",
+        parse_mode="Markdown"
+    )
+
+    session_started_at = time.time()
+
+    try:
+        otp_code = await sync_to_async(extract_otp_from_account_email)(
+            account=account,
+            timeout_seconds=120,
+            interval_seconds=5,
+            min_received_timestamp=session_started_at,
+        )
+    except Exception:
+        logger.exception("Không đọc được Gmail OpenAI OTP.")
+        await query.edit_message_text(
+            f"❌ Không đọc được Gmail của `{account.email}` lúc này. Vui lòng kiểm tra lại cấu hình IMAP hoặc mật khẩu ứng dụng.",
+            reply_markup=chatgpt_accounts_keyboard([account]),
+        )
+        return
+
+    if not otp_code:
+        await query.edit_message_text(
+            f"⏳ Không tìm thấy OTP OpenAI cho `{account.email}` trong vòng 2 phút.\n"
+            "Hãy gửi lại yêu cầu đăng nhập bên OpenAI rồi bấm nút dưới để thử lại.",
+            reply_markup=chatgpt_accounts_keyboard([account]),
+        )
+        return
+
+    await query.edit_message_text(
+        f"🔑 Mã OTP của `{account.email}` là:\n\n"
+        f"👉 *`{otp_code}`*\n\n"
+        f"Hãy nhập mã này vào trang đăng nhập OpenAI để hoàn tất.",
+        reply_markup=chatgpt_accounts_keyboard([account]),
+        parse_mode="Markdown",
+    )
+
+
+
 # ─── Main menu / back to menu ────────────────────────────────────────────────
 
 async def main_menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1080,6 +1173,7 @@ def build_application() -> Application:
 
     application.add_handler(conversation_handler)
     application.add_handler(admin_add_conversation_handler)
+    application.add_handler(CommandHandler("accounts", accounts_command))
     application.add_handler(CommandHandler("me", my_info))
     application.add_handler(CommandHandler("courses", my_courses))
     application.add_handler(CommandHandler("lookup", lookup_customer))
@@ -1089,6 +1183,7 @@ def build_application() -> Application:
     application.add_handler(CallbackQueryHandler(unlink_callback, pattern="^unlink_account$"))
     application.add_handler(CallbackQueryHandler(restart_flow, pattern="^restart_flow$"))
     application.add_handler(CallbackQueryHandler(fetch_openai_otp, pattern="^fetch_openai_otp$"))
+    application.add_handler(CallbackQueryHandler(fetch_chatgpt_otp, pattern="^get_chatgpt_otp_\\d+$"))
     application.add_handler(CallbackQueryHandler(main_menu_callback, pattern="^main_menu$"))
     application.add_handler(CallbackQueryHandler(my_info, pattern="^my_info$"))
     application.add_handler(CallbackQueryHandler(my_courses, pattern="^my_courses$"))

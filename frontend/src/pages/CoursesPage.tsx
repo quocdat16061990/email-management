@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useCourseList, useDeleteCourse, useSyncCourses, useUpdateWebsite } from '../hooks/useCourses'
 import Pagination from '../components/shared/Pagination'
@@ -6,9 +6,10 @@ import LoadingSpinner from '../components/shared/LoadingSpinner'
 import EmptyState from '../components/shared/EmptyState'
 import ErrorState from '../components/shared/ErrorState'
 import { showToast } from '../components/shared/Toast'
-import CourseFormModal from '../components/courses/CourseFormModal'
-import EnrollStudentModal from '../components/courses/EnrollStudentModal'
-import CourseExportModal from '../components/courses/CourseExportModal'
+
+const CourseFormModal = lazy(() => import('../components/courses/CourseFormModal'))
+const EnrollStudentModal = lazy(() => import('../components/courses/EnrollStudentModal'))
+const CourseExportModal = lazy(() => import('../components/courses/CourseExportModal'))
 
 export default function CoursesPage() {
   const [page, setPage] = useState(1)
@@ -324,37 +325,43 @@ export default function CoursesPage() {
       )}
 
       {showForm && (
-        <CourseFormModal
-          course={editCourse}
-          onClose={() => setShowForm(false)}
-          onSuccess={() => {
-            setShowForm(false)
-            refetch()
-          }}
-        />
+        <Suspense fallback={<LoadingSpinner text="Dang tai form khoa hoc..." />}>
+          <CourseFormModal
+            course={editCourse}
+            onClose={() => setShowForm(false)}
+            onSuccess={() => {
+              setShowForm(false)
+              refetch()
+            }}
+          />
+        </Suspense>
       )}
 
       {enrollCourseId && (
-        <EnrollStudentModal
-          courseId={enrollCourseId}
-          courseName={enrollCourseName}
-          onClose={() => {
-            setEnrollCourseId(null)
-            setEnrollCourseName('')
-          }}
-          onSuccess={() => {
-            setEnrollCourseId(null)
-            refetch()
-          }}
-        />
+        <Suspense fallback={<LoadingSpinner text="Dang tai form them hoc vien..." />}>
+          <EnrollStudentModal
+            courseId={enrollCourseId}
+            courseName={enrollCourseName}
+            onClose={() => {
+              setEnrollCourseId(null)
+              setEnrollCourseName('')
+            }}
+            onSuccess={() => {
+              setEnrollCourseId(null)
+              refetch()
+            }}
+          />
+        </Suspense>
       )}
 
       {showExportModal && (
-        <CourseExportModal
-          selectedCourseIds={selectedIds}
-          selectedCount={selectedIds.length}
-          onClose={() => setShowExportModal(false)}
-        />
+        <Suspense fallback={<LoadingSpinner text="Dang tai bo xuat khoa hoc..." />}>
+          <CourseExportModal
+            selectedCourseIds={selectedIds}
+            selectedCount={selectedIds.length}
+            onClose={() => setShowExportModal(false)}
+          />
+        </Suspense>
       )}
     </div>
   )

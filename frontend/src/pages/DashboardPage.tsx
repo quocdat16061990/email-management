@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { useStudentList, useDeleteStudent, useSyncStudents } from '@/hooks/useStudents'
 import { useCourseList } from '@/hooks/useCourses'
 import { useDashboardStats } from '@/hooks/useAuth'
@@ -8,11 +8,13 @@ import StatusBadge from '@/components/shared/StatusBadge'
 import Avatar from '@/components/shared/Avatar'
 import EmptyState from '@/components/shared/EmptyState'
 import ErrorState from '@/components/shared/ErrorState'
+import LoadingSpinner from '@/components/shared/LoadingSpinner'
 import { showToast } from '@/components/shared/Toast'
-import StudentFormModal from '@/components/students/StudentFormModal'
-import ExportModal from '@/components/students/ExportModal'
 import { Link } from 'react-router-dom'
 import type { Student } from '@/types/student'
+
+const StudentFormModal = lazy(() => import('@/components/students/StudentFormModal'))
+const ExportModal = lazy(() => import('@/components/students/ExportModal'))
 
 export default function DashboardPage() {
   const [query, setQuery] = useState('')
@@ -412,30 +414,34 @@ export default function DashboardPage() {
       </div>
 
       {showForm && (
-        <StudentFormModal
-          student={editStudent || undefined}
-          courses={courses.map((c) => ({ id: c.id, name: c.name }))}
-          onClose={() => setShowForm(false)}
-          onSuccess={() => {
-            setShowForm(false)
-            refetch()
-          }}
-        />
+        <Suspense fallback={<LoadingSpinner text="Dang tai form hoc vien..." />}>
+          <StudentFormModal
+            student={editStudent || undefined}
+            courses={courses.map((c) => ({ id: c.id, name: c.name }))}
+            onClose={() => setShowForm(false)}
+            onSuccess={() => {
+              setShowForm(false)
+              refetch()
+            }}
+          />
+        </Suspense>
       )}
 
       {showExportModal && (
-        <ExportModal
-          courses={courses}
-          selectedStudentIds={selectedIds}
-          currentFilters={{
-            q: query,
-            status: selectedStatus,
-            course_ids: courseIdsParam,
-          }}
-          onClose={() => {
-            setShowExportModal(false)
-          }}
-        />
+        <Suspense fallback={<LoadingSpinner text="Dang tai bo xuat Excel..." />}>
+          <ExportModal
+            courses={courses}
+            selectedStudentIds={selectedIds}
+            currentFilters={{
+              q: query,
+              status: selectedStatus,
+              course_ids: courseIdsParam,
+            }}
+            onClose={() => {
+              setShowExportModal(false)
+            }}
+          />
+        </Suspense>
       )}
     </div>
   )

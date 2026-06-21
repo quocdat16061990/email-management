@@ -15,7 +15,7 @@ from django.db.models import Q
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from .models import Course, Customer
+from .models import Course, Customer, ChatGPTAccount
 
 
 EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
@@ -421,7 +421,132 @@ def _message_timestamp(msg: email.message.Message) -> float | None:
         return None
 
 
+def extract_otp_from_account_email(
+    account: ChatGPTAccount,
+    timeout_seconds: int = 120,
+    interval_seconds: int = 5,
+    min_received_timestamp: float | None = None,
+) -> str | None:
+    deadline = time.time() + timeout_seconds
+    imap_user = account.imap_user if account.imap_user else account.email
+    logger.info(
+        "Bat dau quet Gmail OTP cho ChatGPTAccount. email_account=%s imap_host=%s timeout_seconds=%s interval_seconds=%s min_received_timestamp=%s",
+        account.email,
+        account.imap_host,
+        timeout_seconds,
+        interval_seconds,
+        min_received_timestamp,
+    )
+
+    effective_min_timestamp = min_received_timestamp
+    if effective_min_timestamp is None:
+        effective_min_timestamp = time.time() - 180
+
+    while time.time() < deadline:
+        try:
+            mail = imaplib.IMAP4_SSL(account.imap_host, account.imap_port)
+        except Exception as e:
+            logger.error("Loi ket noi IMAP den %s: %s", account.imap_host, e)
+            time.sleep(interval_seconds)
+            continue
+        try:
+            mail.login(imap_user, account.imap_password)
+            mail.select("inbox")
+            status, messages = mail.search(None, '(UNSEEN FROM "openai")')
+            if status != "OK" or not messages or not messages[0]:
+                status, messages = mail.search(None, '(UNSEEN FROM "tm.openai.com")')
+            if status != "OK" or not messages or not messages[0]:
+                status, messages = mail.search(None, '(UNSEEN SUBJECT "ChatGPT")')
+            if status != "OK" or not messages or not messages[0]:
+                status, messages = mail.search(None, '(UNSEEN SUBJECT "OpenAI")')
+            logger.info(
+                "Ket qua search mail OpenAI cho %s. status=%s count=%s",
+                account.email,
+                status,
+                len(messages[0].split()) if status == "OK" and messages and messages[0] else 0,
+            )
+            if status != "OK" or not messages or not messages[0]:
+                time.sleep(interval_seconds)
+                continue
+
+            candidates: list[tuple[float, bytes | str, str, str, str]] = []
+            for num in reversed(messages[0].split()):
+                _, msg_data = mail.fetch(num, "(RFC822)")
+                for part in msg_data:
+                    if not isinstance(part, tuple):
+                        continue
+                    msg = email.message_from_bytes(part[1])
+                    sender = _decode_mime_header(str(msg.get("From", "")))
+                    subject = _decode_mime_header(str(msg.get("Subject", "")))
+                    date_header = str(msg.get("Date", ""))
+                    logger.info(
+                        "Dang xet mail. seq=%s from=%s subject=%s date=%s",
+                        num.decode() if isinstance(num, bytes) else str(num),
+                        sender,
+                        subject,
+                        date_header,
+                    )
+                    if not _is_openai_otp_email(msg):
+                        logger.info("Bo qua mail vi khong khop mau OpenAI OTP.")
+                        continue
+                    msg_ts = _message_timestamp(msg)
+                    if effective_min_timestamp is not None:
+                        if msg_ts is not None and msg_ts < (effective_min_timestamp - 60):
+                            logger.info(
+                                "Bo qua mail vi qua cu. msg_ts=%s min_received_timestamp=%s",
+                                msg_ts,
+                                effective_min_timestamp,
+                            )
+                            continue
+
+                    body = _message_text(msg)
+                    otp_code = _extract_otp_from_body(body)
+                    if otp_code:
+                        candidates.append((
+                            msg_ts if msg_ts is not None else 0.0,
+                            num,
+                            subject,
+                            date_header,
+                            otp_code,
+                        ))
+                        logger.info(
+                            "Tim thay OTP candidate. seq=%s subject=%s date=%s otp=%s",
+                            num.decode() if isinstance(num, bytes) else str(num),
+                            subject,
+                            date_header,
+                            otp_code,
+                        )
+                        continue
+                    logger.info("Mail khop mau OpenAI nhung khong tim thay OTP 6 so.")
+
+            if candidates:
+                latest_ts, latest_num, latest_subject, latest_date, latest_otp = max(candidates, key=lambda item: item[0])
+                mail.store(latest_num, "+FLAGS", "\\Seen")
+                logger.info(
+                    "Chon OTP moi nhat. seq=%s subject=%s date=%s ts=%s otp=%s",
+                    latest_num.decode() if isinstance(latest_num, bytes) else str(latest_num),
+                    latest_subject,
+                    latest_date,
+                    latest_ts,
+                    latest_otp,
+                )
+                return latest_otp
+        except Exception as e:
+            logger.exception("Loi xay ra khi doc mail tu tai khoan %s: %s", account.email, e)
+        finally:
+            try:
+                mail.logout()
+            except Exception:
+                pass
+
+        time.sleep(interval_seconds)
+
+    logger.info("Het thoi gian quet Gmail OTP cho tai khoan %s nhung khong tim thay ma.", account.email)
+    return None
+
+
 def extract_otp_from_openai_email(
+
     timeout_seconds: int = 120,
     interval_seconds: int = 5,
     min_received_timestamp: float | None = None,

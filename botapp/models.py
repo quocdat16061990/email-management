@@ -37,6 +37,7 @@ class Customer(models.Model):
     status = models.CharField(max_length=20, default="ACTIVE")
     has_sent_otp = models.BooleanField(default=False)
     is_verified_telegram = models.BooleanField(default=False)
+    is_staff = models.BooleanField(default=False)
     telegram_otp = models.CharField(max_length=6, null=True, blank=True)
     telegram_otp_created_at = models.DateTimeField(null=True, blank=True)
     courses = models.ManyToManyField(Course, through="Enrollment", blank=True, related_name="customers")
@@ -79,3 +80,27 @@ class Enrollment(models.Model):
 
     def __str__(self) -> str:
         return f"{self.customer.customer_email} - {self.course.name} ({self.status})"
+
+
+class ChatGPTAccount(models.Model):
+    email = models.EmailField(unique=True, verbose_name="Email ChatGPT")
+    password = models.CharField(max_length=255, verbose_name="Mật khẩu đăng nhập")
+    
+    # Cấu hình IMAP để bot tự động đọc OTP
+    imap_host = models.CharField(max_length=255, default="imap.gmail.com", verbose_name="IMAP Server")
+    imap_port = models.IntegerField(default=993, verbose_name="IMAP Port")
+    imap_user = models.CharField(max_length=255, blank=True, null=True, verbose_name="IMAP Username")
+    imap_password = models.CharField(max_length=255, verbose_name="Mật khẩu ứng dụng Email (đọc OTP)")
+    
+    status = models.CharField(
+        max_length=20, 
+        choices=[("ACTIVE", "Đang hoạt động"), ("INACTIVE", "Khóa/Tạm dừng"), ("ERROR", "Lỗi cấu hình mail")], 
+        default="ACTIVE",
+        verbose_name="Trạng thái"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"{self.email} ({self.status})"
+
