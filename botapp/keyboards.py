@@ -84,3 +84,17 @@ def restart_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔄 Bắt đầu lại", callback_data="restart_flow")],
     ])
+
+
+def chatgpt_accounts_keyboard(accounts: list) -> InlineKeyboardMarkup:
+    buttons = []
+    for acc in accounts:
+        buttons.append([
+            InlineKeyboardButton(
+                f"🔑 Lấy OTP: {acc.email}",
+                callback_data=f"get_chatgpt_otp_{acc.id}"
+            )
+        ])
+    buttons.append([InlineKeyboardButton("🔙 Quay lại Menu", callback_data="main_menu")])
+    return InlineKeyboardMarkup(buttons)
+
