@@ -1,10 +1,10 @@
-import { useAuth } from '../context/AuthContext'
-import { useLogin } from '../hooks/useAuth'
 import { Navigate } from 'react-router-dom'
-import { showToast } from '../components/shared/Toast'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { useAuth } from '../context/AuthContext'
+import { useLogin } from '../hooks/useAuth'
+import { showToast } from '../components/shared/Toast'
 
 const loginSchema = z.object({
   email: z.string()
@@ -53,14 +53,13 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-[#f8fafc] px-4">
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-xl shadow-gray-200/50 border border-gray-100 p-8">
-          {/* Logo */}
           <div className="flex flex-col items-center mb-8">
-            <img 
-              src="/logo.png" 
-              alt="Logo" 
-              className="w-16 h-16 object-contain mb-4" 
+            <img
+              src="/logo.png"
+              alt="Logo"
+              className="w-16 h-16 object-contain mb-4"
             />
-            <h1 className="text-xl font-bold text-gray-900">Anh Lap Trinh</h1>
+            <h1 className="text-xl font-bold text-gray-900">Anh Lập Trình</h1>
             <p className="text-sm text-gray-500 mt-1">Đăng nhập để quản lý hệ thống</p>
           </div>
 

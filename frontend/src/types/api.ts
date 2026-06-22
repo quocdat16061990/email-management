@@ -15,9 +15,13 @@ export interface ApiSuccess<T = unknown> {
 }
 
 export interface DashboardStats {
-  total_students: number;
-  active_count: number;
-  pending_count: number;
-  expired_count: number;
-  total_courses: number;
+  total_chatgpt_accounts?: number;
+  active_chatgpt_accounts?: number;
+  imap_error_accounts?: number;
+  linked_customers?: number;
+  total_students?: number;
+  active_count?: number;
+  pending_count?: number;
+  expired_count?: number;
+  total_courses?: number;
 }

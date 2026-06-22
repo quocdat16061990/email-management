@@ -39,9 +39,7 @@ export default function Pagination({ pagination, onPageChange }: PaginationProps
           disabled={!has_prev}
           className={cn(
             'px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer',
-            has_prev
-              ? 'text-gray-700 hover:bg-gray-100'
-              : 'text-gray-300 cursor-not-allowed',
+            has_prev ? 'text-gray-700 hover:bg-gray-100' : 'text-gray-300 cursor-not-allowed',
           )}
         >
           Trước
@@ -55,9 +53,7 @@ export default function Pagination({ pagination, onPageChange }: PaginationProps
               onClick={() => onPageChange(p)}
               className={cn(
                 'px-3 py-1.5 text-sm rounded-lg font-medium transition-colors cursor-pointer',
-                p === current_page
-                  ? 'bg-brand-500 text-white shadow-sm'
-                  : 'text-gray-600 hover:bg-gray-100',
+                p === current_page ? 'bg-brand-500 text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100',
               )}
             >
               {p}
@@ -69,9 +65,7 @@ export default function Pagination({ pagination, onPageChange }: PaginationProps
           disabled={!has_next}
           className={cn(
             'px-3 py-1.5 text-sm rounded-lg transition-colors cursor-pointer',
-            has_next
-              ? 'text-gray-700 hover:bg-gray-100'
-              : 'text-gray-300 cursor-not-allowed',
+            has_next ? 'text-gray-700 hover:bg-gray-100' : 'text-gray-300 cursor-not-allowed',
           )}
         >
           Sau

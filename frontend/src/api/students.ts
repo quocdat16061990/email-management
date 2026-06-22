@@ -57,6 +57,10 @@ export function deleteStudent(id: number): Promise<{ success: boolean; message: 
   return apiDelete(`/api/dashboard/${id}/delete/`)
 }
 
+export function updateCustomerChatGPTAccess(id: number, accountIds: number[]): Promise<{ success: boolean; student: Student }> {
+  return apiPut(`/api/customers/${id}/chatgpt-access/`, { account_ids: accountIds })
+}
+
 export interface StudentSearchResponse {
   students: StudentSearchResult[]
   pagination: Pagination

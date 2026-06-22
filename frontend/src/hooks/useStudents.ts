@@ -5,6 +5,7 @@ import {
   createStudent,
   updateStudent,
   deleteStudent,
+  updateCustomerChatGPTAccess,
   searchStudents,
   exportStudents,
   type CreateStudentInput,
@@ -72,6 +73,16 @@ export function useDeleteStudent() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['students'] })
       qc.invalidateQueries({ queryKey: ['dashboard-stats'] })
+    },
+  })
+}
+
+export function useUpdateCustomerChatGPTAccess() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, accountIds }: { id: number; accountIds: number[] }) => updateCustomerChatGPTAccess(id, accountIds),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['students'] })
     },
   })
 }

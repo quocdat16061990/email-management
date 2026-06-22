@@ -15,18 +15,11 @@ from django.db.models import Q
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from .models import Course, Customer, ChatGPTAccount
+from .models import Customer, ChatGPTAccount
 
 
 EMAIL_PATTERN = re.compile(r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$")
 logger = logging.getLogger(__name__)
-COURSE_NAMES = [
-    "ChatGPT Automation",
-    "Prompt Engineering Basic",
-    "AI Support Agent",
-    "Python for Office",
-    "Email Workflow Mastery",
-]
 FALLBACK_NAMES = [
     "Nguyen Minh Anh",
     "Tran Quoc Dat",
@@ -40,10 +33,6 @@ def is_valid_email(email: str) -> bool:
     return bool(EMAIL_PATTERN.fullmatch(email.strip()))
 
 
-def list_available_courses() -> list[Course]:
-    return list(Course.objects.order_by("name"))
-
-
 def normalize_phone_number(phone_number: str) -> str:
     return re.sub(r"\D+", "", phone_number or "")
 
@@ -54,7 +43,7 @@ def _build_customer_profile(chat_id: int, customer_email: str) -> dict[str, obje
     tokens = [token.capitalize() for token in re.split(r"[._-]+", local_part) if token and token.isalpha()]
     full_name = " ".join(tokens[:4]) if tokens else FALLBACK_NAMES[seed % len(FALLBACK_NAMES)]
     registration_date = timezone.localdate()
-    expiry_date = registration_date + timedelta(days=30 + (seed % 90))
+    expiry_date = registration_date + timedelta(days=365)
     phone_number = f"0{((seed % 900000000) + 100000000):09d}"
     return {
         "full_name": full_name,
@@ -62,15 +51,6 @@ def _build_customer_profile(chat_id: int, customer_email: str) -> dict[str, obje
         "registration_date": registration_date,
         "expiry_date": expiry_date,
     }
-
-
-def _default_course_names(chat_id: int, customer_email: str) -> list[str]:
-    seed = abs(chat_id) + sum(ord(char) for char in customer_email.lower())
-    first_index = seed % len(COURSE_NAMES)
-    second_index = (first_index + 2) % len(COURSE_NAMES)
-    if first_index == second_index:
-        return [COURSE_NAMES[first_index]]
-    return [COURSE_NAMES[first_index], COURSE_NAMES[second_index]]
 
 
 def create_or_update_customer(chat_id: int, customer_email: str) -> Customer:
@@ -92,10 +72,6 @@ def create_or_update_customer(chat_id: int, customer_email: str) -> Customer:
     if fields_to_update:
         customer.save(update_fields=fields_to_update)
 
-    if not customer.courses.exists():
-        courses = list(Course.objects.filter(name__in=_default_course_names(chat_id, customer_email)))
-        if courses:
-            customer.courses.set(courses)
     return customer
 
 
@@ -105,7 +81,7 @@ def get_or_create_customer_for_otp(customer_email: str, otp_code: str) -> Custom
     if not customer:
         customer = Customer.objects.create(
             customer_email=normalized_email,
-            status="PENDING",
+            status="ACTIVE",
             has_sent_otp=False,
             is_verified_telegram=False,
         )
@@ -114,10 +90,6 @@ def get_or_create_customer_for_otp(customer_email: str, otp_code: str) -> Custom
             setattr(customer, field_name, value)
         customer.save()
         
-        courses = list(Course.objects.filter(name__in=_default_course_names(0, normalized_email)))
-        if courses:
-            customer.courses.set(courses)
-            
     customer.telegram_otp = otp_code
     customer.telegram_otp_created_at = timezone.now()
     customer.save(update_fields=["telegram_otp", "telegram_otp_created_at"])
@@ -142,62 +114,10 @@ def create_customer_from_admin(customer_email: str) -> tuple[Customer, bool]:
         customer.save()
         created = True
 
-    if not customer.courses.exists():
-        courses = list(Course.objects.filter(name__in=_default_course_names(0, normalized_email)))
-        if courses:
-            customer.courses.set(courses)
-
     if customer.status != "ACTIVE":
         customer.status = "ACTIVE"
         customer.save(update_fields=["status"])
 
-    return customer, created
-
-
-def assign_courses_to_customer_from_admin(
-    customer_email: str,
-    course_ids: list[int],
-    full_name: str = None,
-    phone_number: str = None,
-) -> tuple[Customer, bool]:
-    customer, created = create_customer_from_admin(customer_email)
-    
-    # Update full_name and phone_number if they are provided
-    updated_fields = []
-    if full_name:
-        customer.full_name = full_name.strip()
-        updated_fields.append("full_name")
-    if phone_number:
-        customer.phone_number = normalize_phone_number(phone_number)
-        updated_fields.append("phone_number")
-    if updated_fields:
-        customer.save(update_fields=updated_fields)
-
-    normalized_ids = sorted({int(course_id) for course_id in course_ids})
-    today = timezone.localdate()
-    expiry_date = today + timedelta(days=90)
-
-    Enrollment = customer.enrollments.model
-    existing_enrollments = {enrollment.course_id: enrollment for enrollment in customer.enrollments.all()}
-
-    for course_id in normalized_ids:
-        enrollment = existing_enrollments.get(course_id)
-        if enrollment:
-            enrollment.status = "ACTIVE"
-            enrollment.registration_date = enrollment.registration_date or today
-            enrollment.expiry_date = enrollment.expiry_date or expiry_date
-            enrollment.save(update_fields=["status", "registration_date", "expiry_date"])
-        else:
-            Enrollment.objects.create(
-                customer=customer,
-                course_id=course_id,
-                status="ACTIVE",
-                registration_date=today,
-                expiry_date=expiry_date,
-            )
-
-    Enrollment.objects.filter(customer=customer).exclude(course_id__in=normalized_ids).delete()
-    customer.sync_overall_fields()
     return customer, created
 
 
@@ -236,9 +156,9 @@ def upsert_customer_from_web(
     customer_email: str,
     phone_number: str,
     full_name: str,
-    course_names: Iterable[str],
-    registration_date,
-    expiry_date,
+    course_names: Iterable[str] | None = None,
+    registration_date=None,
+    expiry_date=None,
     status: str = "ACTIVE",
 ) -> Customer:
     normalized_phone = normalize_phone_number(phone_number)
@@ -253,12 +173,6 @@ def upsert_customer_from_web(
         },
     )
 
-    resolved_courses = []
-    for course_name in sorted({name.strip() for name in course_names if name and name.strip()}):
-        course, _ = Course.objects.get_or_create(name=course_name)
-        resolved_courses.append(course)
-
-    customer.courses.set(resolved_courses)
     return customer
 
 
@@ -271,14 +185,12 @@ def lookup_customers(keyword: str) -> list[Customer]:
     filters = (
         Q(customer_email__icontains=cleaned_keyword)
         | Q(full_name__icontains=cleaned_keyword)
-        | Q(courses__name__icontains=cleaned_keyword)
     )
     if normalized_phone:
         filters |= Q(phone_number__icontains=normalized_phone)
 
     return list(
         Customer.objects.filter(filters)
-        .prefetch_related("courses")
         .order_by("-created_at")
         .distinct()[:10]
     )
@@ -291,7 +203,6 @@ def lookup_customer_by_email(customer_email: str) -> Customer | None:
 
     return (
         Customer.objects.filter(customer_email=normalized_email)
-        .prefetch_related("courses", "enrollments__course")
         .first()
     )
 

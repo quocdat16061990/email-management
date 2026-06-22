@@ -1,55 +1,19 @@
 from functools import wraps
-
 import json
-from datetime import datetime, timedelta
 
 from django.conf import settings
-from django.contrib import messages
 from django.core.paginator import Paginator
-from django.db.models import Count, Q
+from django.db.models import Q
 from django.db.models.functions import Lower
 from django.http import HttpRequest, HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404, redirect, render
-from django.utils import timezone
+from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.csrf import csrf_exempt
 
-from .forms import CourseForm, CustomerRegistrationForm, LoginForm
-from .models import Course, CourseLink, Customer, Enrollment
-from .services import (
-    normalize_phone_number,
-    upsert_customer_from_web,
-)
+from .models import ChatGPTAccount, Customer
+from .services import normalize_phone_number
 
 
 SESSION_KEY = "webapp_authenticated"
-
-
-def _base_context() -> dict[str, str]:
-    return {
-        "company_name": settings.COMPANY_NAME,
-        "company_logo_text": settings.COMPANY_LOGO_TEXT,
-    }
-
-
-def _sanitize_sheet_title(title: str, fallback: str = "Sheet") -> str:
-    invalid_chars = ['\\', '/', '*', '?', ':', '[', ']']
-    clean_title = title or fallback
-    for char in invalid_chars:
-        clean_title = clean_title.replace(char, " ")
-    clean_title = " ".join(clean_title.split()).strip()
-    return clean_title[:31] or fallback
-
-
-def _build_unique_sheet_title(title: str, existing_titles: set[str]) -> str:
-    base_title = _sanitize_sheet_title(title)
-    candidate = base_title
-    suffix = 2
-    while candidate in existing_titles:
-        suffix_text = f" ({suffix})"
-        candidate = f"{base_title[: max(0, 31 - len(suffix_text))]}{suffix_text}"
-        suffix += 1
-    existing_titles.add(candidate)
-    return candidate
 
 
 def web_login_required(view_func):
@@ -72,6 +36,46 @@ def api_login_required(view_func):
     return wrapped
 
 
+def _json_body(request: HttpRequest) -> tuple[dict, JsonResponse | None]:
+    try:
+        return json.loads(request.body or b"{}"), None
+    except json.JSONDecodeError:
+        return {}, JsonResponse({"error": "Dữ liệu JSON không hợp lệ."}, status=400)
+
+
+def _account_payload(account: ChatGPTAccount) -> dict:
+    return {
+        "id": account.id,
+        "email": account.email,
+        "password": account.password,
+        "imap_host": account.imap_host,
+        "imap_port": account.imap_port,
+        "imap_user": account.imap_user or "",
+        "imap_password": account.imap_password,
+        "status": account.status,
+        "created_at": account.created_at.isoformat(),
+        "updated_at": account.updated_at.isoformat(),
+    }
+
+
+def _customer_payload(customer: Customer) -> dict:
+    allowed_ids = list(customer.allowed_chatgpt_accounts.values_list("id", flat=True))
+    return {
+        "id": customer.id,
+        "full_name": customer.full_name,
+        "customer_email": customer.customer_email,
+        "phone_number": customer.phone_number,
+        "status": customer.status,
+        "registration_date": str(customer.registration_date) if customer.registration_date else None,
+        "expiry_date": str(customer.expiry_date) if customer.expiry_date else None,
+        "telegram_chat_id": customer.telegram_chat_id,
+        "is_verified_telegram": customer.is_verified_telegram,
+        "is_staff": customer.is_staff,
+        "allowed_chatgpt_account_ids": allowed_ids,
+        "chatgpt_access_mode": "custom" if allowed_ids else "default",
+    }
+
+
 def login_view(request: HttpRequest) -> HttpResponse:
     return redirect(f"{settings.FRONTEND_URL}/login")
 
@@ -82,174 +86,23 @@ def dashboard_view(request: HttpRequest) -> HttpResponse:
 
 
 @web_login_required
+def chatgpt_accounts_view(request: HttpRequest) -> HttpResponse:
+    return redirect(f"{settings.FRONTEND_URL}/chatgpt-accounts")
+
+
+@web_login_required
 def logout_view(request: HttpRequest) -> HttpResponse:
     request.session.flush()
     return redirect(f"{settings.FRONTEND_URL}/login")
 
 
-@web_login_required
-def courses_view(request: HttpRequest) -> HttpResponse:
-    return redirect(f"{settings.FRONTEND_URL}/courses")
-
-
-@api_login_required
-def student_detail_api(request: HttpRequest) -> JsonResponse:
-    student_id = request.GET.get("id")
-    if not student_id:
-        return JsonResponse({"error": "Missing student ID"}, status=400)
-
-    student = get_object_or_404(Customer, id=student_id)
-    courses_ids = list(student.courses.values_list("id", flat=True))
-    
-    enrollments_data = []
-    for enroll in student.enrollments.all():
-        enrollments_data.append({
-            "course_id": enroll.course_id,
-            "registration_date": str(enroll.registration_date) if enroll.registration_date else "",
-            "expiry_date": str(enroll.expiry_date) if enroll.expiry_date else "",
-            "status": enroll.status,
-        })
-
-    return JsonResponse({
-        "id": student.id,
-        "full_name": student.full_name,
-        "customer_email": student.customer_email,
-        "phone_number": student.phone_number,
-        "status": student.status,
-        "registration_date": str(student.registration_date) if student.registration_date else "",
-        "expiry_date": str(student.expiry_date) if student.expiry_date else "",
-        "telegram_chat_id": student.telegram_chat_id,
-        "is_verified_telegram": student.is_verified_telegram,
-        "courses": courses_ids,
-        "enrollments": enrollments_data,
-    })
-
-
-@api_login_required
-def course_detail_api(request: HttpRequest) -> JsonResponse:
-    course_id = request.GET.get("id")
-    if not course_id:
-        return JsonResponse({"error": "Missing course ID"}, status=400)
-
-    course = get_object_or_404(Course, id=course_id)
-    links_data = [{"title": link.title, "url": link.url} for link in course.links.all()]
-    return JsonResponse({
-        "id": course.id,
-        "name": course.name,
-        "description": course.description or "",
-        "web_link": course.web_link or "",
-        "links": links_data,
-    })
-
-
-
-@web_login_required
-def student_detail_view(request: HttpRequest, student_id: int) -> HttpResponse:
-    return redirect(f"{settings.FRONTEND_URL}/students/{student_id}")
-
-
-@csrf_exempt
-@api_login_required
-def update_course_website_api(request: HttpRequest) -> JsonResponse:
-    if request.method != "POST":
-        return JsonResponse({"error": "Phương thức không được hỗ trợ"}, status=405)
-
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Dữ liệu JSON không hợp lệ"}, status=400)
-
-    course_id = data.get("id")
-    web_link = data.get("web_link", "").strip()
-
-    if not course_id:
-        return JsonResponse({"error": "Thiếu ID khóa học"}, status=400)
-
-    course = get_object_or_404(Course, id=course_id)
-    course.web_link = web_link
-    course.save(update_fields=["web_link"])
-
-    return JsonResponse({
-        "success": True,
-        "message": f"Đã cập nhật website cho khóa học '{course.name}' thành công.",
-        "web_link": course.web_link
-    })
-
-
-@api_login_required
-def student_search_api(request: HttpRequest) -> JsonResponse:
-    query = request.GET.get("q", "").strip()
-    page_number = request.GET.get("page", 1)
-    course_id = request.GET.get("course_id")
-
-    students_query = Customer.objects.all().order_by("-created_at")
-    if query:
-        from django.db.models import Q
-        students_query = students_query.filter(
-            Q(full_name__icontains=query) |
-            Q(customer_email__icontains=query) |
-            Q(phone_number__icontains=query)
-        )
-
-    enrolled_student_ids = set()
-    if course_id:
-        from .models import Enrollment
-        enrolled_student_ids = set(
-            Enrollment.objects.filter(course_id=course_id).values_list("customer_id", flat=True)
-        )
-
-    from django.core.paginator import Paginator
-    paginator = Paginator(students_query, 10)
-    
-    try:
-        page_obj = paginator.page(page_number)
-    except Exception:
-        page_obj = paginator.page(1)
-
-    students_data = []
-    for s in page_obj:
-        students_data.append({
-            "id": s.id,
-            "full_name": s.full_name,
-            "customer_email": s.customer_email,
-            "phone_number": s.phone_number,
-            "is_enrolled": s.id in enrolled_student_ids
-        })
-
-    return JsonResponse({
-        "students": students_data,
-        "pagination": {
-            "current_page": page_obj.number,
-            "total_pages": paginator.num_pages,
-            "has_next": page_obj.has_next(),
-            "has_prev": page_obj.has_previous(),
-            "next_page_number": page_obj.next_page_number() if page_obj.has_next() else None,
-            "prev_page_number": page_obj.previous_page_number() if page_obj.has_previous() else None,
-            "total_count": paginator.count
-        }
-    })
-
-
-@web_login_required
-def enroll_student_view(request: HttpRequest) -> HttpResponse:
-    return redirect(f"{settings.FRONTEND_URL}/courses")
-
-
-@web_login_required
-def course_detail_view(request: HttpRequest, course_id: int) -> HttpResponse:
-    return redirect(f"{settings.FRONTEND_URL}/courses/{course_id}")
-
-
-# ─── API: Auth ────────────────────────────────────────────────────────────────
-
 @csrf_exempt
 def api_login(request: HttpRequest) -> JsonResponse:
     if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
+        return JsonResponse({"error": "Phương thức không được hỗ trợ."}, status=405)
+    data, error = _json_body(request)
+    if error:
+        return error
 
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
@@ -268,7 +121,15 @@ def api_logout(request: HttpRequest) -> JsonResponse:
     return JsonResponse({"success": True})
 
 
-# ─── API: Dashboard / Students ───────────────────────────────────────────────
+@api_login_required
+def api_dashboard_stats(request: HttpRequest) -> JsonResponse:
+    return JsonResponse({
+        "total_chatgpt_accounts": ChatGPTAccount.objects.count(),
+        "active_chatgpt_accounts": ChatGPTAccount.objects.filter(status="ACTIVE").count(),
+        "imap_error_accounts": ChatGPTAccount.objects.filter(status="ERROR").count(),
+        "linked_customers": Customer.objects.filter(telegram_chat_id__isnull=False, is_verified_telegram=True).count(),
+    })
+
 
 @api_login_required
 def api_dashboard_list(request: HttpRequest) -> JsonResponse:
@@ -276,7 +137,6 @@ def api_dashboard_list(request: HttpRequest) -> JsonResponse:
     page_number = request.GET.get("page", 1)
     sort_by = request.GET.get("sort_by", "created_at").strip()
     sort_order = request.GET.get("sort_order", "desc").strip()
-    course_ids_str = request.GET.get("course_ids", "").strip()
     status = request.GET.get("status", "").strip()
 
     allowed_sorts = {
@@ -287,63 +147,25 @@ def api_dashboard_list(request: HttpRequest) -> JsonResponse:
         "expiry_date": "expiry_date",
         "status": "status",
     }
-
     sort_field = allowed_sorts.get(sort_by, "created_at")
     if isinstance(sort_field, str):
-        if sort_order == "desc":
-            sort_field = f"-{sort_field}"
-        order_by_args = [sort_field, "-id"]
+        order_by_args = [f"-{sort_field}" if sort_order == "desc" else sort_field, "-id"]
     else:
-        if sort_order == "desc":
-            order_by_args = [sort_field.desc(), "-id"]
-        else:
-            order_by_args = [sort_field.asc(), "-id"]
+        order_by_args = [sort_field.desc() if sort_order == "desc" else sort_field.asc(), "-id"]
 
-    qs = Customer.objects.prefetch_related("enrollments__course").order_by(*order_by_args)
+    qs = Customer.objects.prefetch_related("allowed_chatgpt_accounts").order_by(*order_by_args)
     if query:
         qs = qs.filter(Q(full_name__icontains=query) | Q(customer_email__icontains=query) | Q(phone_number__icontains=query))
-
-    if course_ids_str:
-        try:
-            course_ids = [int(x.strip()) for x in course_ids_str.split(",") if x.strip()]
-            if course_ids:
-                qs = qs.filter(enrollments__course_id__in=course_ids)
-        except ValueError:
-            pass
-
     if status and status != "ALL":
         qs = qs.filter(status=status)
 
-    qs = qs.distinct()
-
     paginator = Paginator(qs, 10)
     page_obj = paginator.get_page(page_number)
-
-    students_data = []
-    for s in page_obj:
-        enrollments = [
-            {
-                "course_id": e.course_id,
-                "course_name": e.course.name,
-                "registration_date": str(e.registration_date) if e.registration_date else None,
-                "expiry_date": str(e.expiry_date) if e.expiry_date else None,
-                "status": e.status,
-            }
-            for e in s.enrollments.all()
-        ]
-        students_data.append({
-            "id": s.id,
-            "full_name": s.full_name,
-            "customer_email": s.customer_email,
-            "phone_number": s.phone_number,
-            "status": s.status,
-            "registration_date": str(s.registration_date) if s.registration_date else None,
-            "expiry_date": str(s.expiry_date) if s.expiry_date else None,
-            "enrollments": enrollments,
-        })
+    customers = [_customer_payload(customer) for customer in page_obj]
 
     return JsonResponse({
-        "students": students_data,
+        "students": customers,
+        "customers": customers,
         "pagination": {
             "current_page": page_obj.number,
             "total_pages": paginator.num_pages,
@@ -357,431 +179,48 @@ def api_dashboard_list(request: HttpRequest) -> JsonResponse:
     })
 
 
-@api_login_required
-def api_export_students(request: HttpRequest) -> HttpResponse:
-    student_ids_str = request.GET.get("student_ids", "").strip()
-    course_ids_str = request.GET.get("course_ids", "").strip()
-    status = request.GET.get("status", "").strip()
-    query = request.GET.get("q", "").strip()
-    export_type = request.GET.get("export_type", "simple").strip()
-
-    qs = Customer.objects.prefetch_related("enrollments__course").order_by("-created_at")
-
-    if student_ids_str:
-        try:
-            student_ids = [int(x.strip()) for x in student_ids_str.split(",") if x.strip()]
-            if student_ids:
-                qs = qs.filter(id__in=student_ids)
-        except ValueError:
-            pass
-    else:
-        if query:
-            qs = qs.filter(
-                Q(full_name__icontains=query) |
-                Q(customer_email__icontains=query) |
-                Q(phone_number__icontains=query)
-            )
-        if course_ids_str:
-            try:
-                course_ids = [int(x.strip()) for x in course_ids_str.split(",") if x.strip()]
-                if course_ids:
-                    qs = qs.filter(enrollments__course_id__in=course_ids)
-            except ValueError:
-                pass
-        if status and status != "ALL":
-            qs = qs.filter(status=status)
-
-    qs = qs.distinct()
-
-    import openpyxl
-    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-    from openpyxl.utils import get_column_letter
-
-    wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Danh sách học viên"
-    ws.views.sheetView[0].showGridLines = True
-
-    header_fill = PatternFill(start_color="10B981", end_color="10B981", fill_type="solid")
-    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-    data_font = Font(name="Calibri", size=11)
-    title_font = Font(name="Calibri", size=16, bold=True, color="047857")
-    meta_font = Font(name="Calibri", size=10, italic=True)
-
-    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
-
-    thin_border = Border(
-        left=Side(style='thin', color='E5E7EB'),
-        right=Side(style='thin', color='E5E7EB'),
-        top=Side(style='thin', color='E5E7EB'),
-        bottom=Side(style='thin', color='E5E7EB')
-    )
-
-    ws.merge_cells("A1:H1" if export_type == "full" else "A1:C1")
-    ws["A1"] = "DANH SÁCH HỌC VIÊN"
-    ws["A1"].font = title_font
-    ws["A1"].alignment = left_align
-    ws.row_dimensions[1].height = 30
-
-    ws.merge_cells("A2:H2" if export_type == "full" else "A2:C2")
-    ws["A2"] = f"Ngày xuất file: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} | Số lượng: {qs.count()} học viên"
-    ws["A2"].font = meta_font
-    ws["A2"].alignment = left_align
-    ws.row_dimensions[2].height = 20
-
-    ws.row_dimensions[3].height = 10
-
-    if export_type == "full":
-        headers = ["STT", "Họ và Tên", "Email", "Số điện thoại", "Trạng thái", "Ngày đăng ký", "Ngày hết hạn", "Khóa học đã đăng ký"]
-    else:
-        headers = ["STT", "Họ và Tên", "Email"]
-
-    header_row_idx = 4
-    ws.row_dimensions[header_row_idx].height = 25
-    for col_idx, header in enumerate(headers, 1):
-        cell = ws.cell(row=header_row_idx, column=col_idx, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = center_align
-        cell.border = thin_border
-
-    current_row = 5
-    for idx, s in enumerate(qs, 1):
-        ws.row_dimensions[current_row].height = 20
-        row_data = []
-        if export_type == "full":
-            course_names = ", ".join([e.course.name for e in s.enrollments.all()])
-            status_text = "Hoạt động" if s.status == "ACTIVE" else "Chờ xử lý" if s.status == "PENDING" else "Hết hạn"
-            row_data = [
-                idx,
-                s.full_name or "-",
-                s.customer_email,
-                s.phone_number or "-",
-                status_text,
-                s.registration_date.strftime("%d/%m/%Y") if s.registration_date else "-",
-                s.expiry_date.strftime("%d/%m/%Y") if s.expiry_date else "-",
-                course_names or "-"
-            ]
-        else:
-            row_data = [
-                idx,
-                s.full_name or "-",
-                s.customer_email
-            ]
-
-        for col_idx, value in enumerate(row_data, 1):
-            cell = ws.cell(row=current_row, column=col_idx, value=value)
-            cell.font = data_font
-            cell.border = thin_border
-            if col_idx == 1:
-                cell.alignment = center_align
-            elif export_type == "full" and col_idx in [4, 5, 6, 7]:
-                cell.alignment = center_align
-            else:
-                cell.alignment = left_align
-
-        current_row += 1
-
-    for col in ws.columns:
-        max_len = 0
-        col_letter = get_column_letter(col[0].column)
-        for cell in col:
-            if cell.row in [1, 2, 3]:
-                continue
-            if cell.value:
-                max_len = max(max_len, len(str(cell.value)))
-        ws.column_dimensions[col_letter].width = max(max_len + 3, 10)
-
-    if export_type == "full":
-        ws.column_dimensions["A"].width = 6
-        ws.column_dimensions["B"].width = 25
-        ws.column_dimensions["C"].width = 30
-        ws.column_dimensions["D"].width = 15
-        ws.column_dimensions["E"].width = 15
-        ws.column_dimensions["F"].width = 15
-        ws.column_dimensions["G"].width = 15
-        ws.column_dimensions["H"].width = 40
-    else:
-        ws.column_dimensions["A"].width = 6
-        ws.column_dimensions["B"].width = 25
-        ws.column_dimensions["C"].width = 30
-
-    response = HttpResponse(content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    filename = f"danh_sach_hoc_vien_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    response["Content-Disposition"] = f'attachment; filename="{filename}"'
-    wb.save(response)
-    return response
-
-
-@api_login_required
-def api_export_courses(request: HttpRequest) -> HttpResponse:
-    course_ids_str = request.GET.get("course_ids", "").strip()
-    query = request.GET.get("q", "").strip()
-
-    qs = Course.objects.annotate(student_count=Count("customers")).prefetch_related(
-        "enrollments__customer"
-    ).order_by(Lower("name"), "id")
-
-    if course_ids_str:
-        try:
-            course_ids = [int(x.strip()) for x in course_ids_str.split(",") if x.strip()]
-            if course_ids:
-                qs = qs.filter(id__in=course_ids)
-        except ValueError:
-            pass
-
-    if query:
-        qs = qs.filter(name__icontains=query)
-
-    courses = list(qs.distinct())
-
-    import openpyxl
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-
-    wb = openpyxl.Workbook()
-    summary_ws = wb.active
-    summary_ws.title = "Tong hop khoa hoc"
-    summary_ws.views.sheetView[0].showGridLines = True
-
-    header_fill = PatternFill(start_color="10B981", end_color="10B981", fill_type="solid")
-    header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-    data_font = Font(name="Calibri", size=11)
-    title_font = Font(name="Calibri", size=16, bold=True, color="047857")
-    meta_font = Font(name="Calibri", size=10, italic=True)
-
-    center_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    left_align = Alignment(horizontal="left", vertical="center", wrap_text=True)
-
-    thin_border = Border(
-        left=Side(style="thin", color="E5E7EB"),
-        right=Side(style="thin", color="E5E7EB"),
-        top=Side(style="thin", color="E5E7EB"),
-        bottom=Side(style="thin", color="E5E7EB"),
-    )
-
-    summary_ws.merge_cells("A1:E1")
-    summary_ws["A1"] = "DANH SACH KHOA HOC"
-    summary_ws["A1"].font = title_font
-    summary_ws["A1"].alignment = left_align
-    summary_ws.row_dimensions[1].height = 30
-
-    summary_ws.merge_cells("A2:E2")
-    summary_ws["A2"] = (
-        f"Ngay xuat file: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')} | "
-        f"So luong khoa hoc: {len(courses)}"
-    )
-    summary_ws["A2"].font = meta_font
-    summary_ws["A2"].alignment = left_align
-    summary_ws.row_dimensions[2].height = 20
-    summary_ws.row_dimensions[3].height = 10
-
-    summary_headers = ["STT", "Khoa hoc", "So hoc vien", "Website", "Ngay tao"]
-    for col_idx, header in enumerate(summary_headers, 1):
-        cell = summary_ws.cell(row=4, column=col_idx, value=header)
-        cell.font = header_font
-        cell.fill = header_fill
-        cell.alignment = center_align
-        cell.border = thin_border
-
-    for row_idx, course in enumerate(courses, 5):
-        row_data = [
-            row_idx - 4,
-            course.name,
-            course.student_count or 0,
-            course.web_link or "-",
-            course.created_at.strftime("%d/%m/%Y"),
-        ]
-        for col_idx, value in enumerate(row_data, 1):
-            cell = summary_ws.cell(row=row_idx, column=col_idx, value=value)
-            cell.font = data_font
-            cell.border = thin_border
-            cell.alignment = center_align if col_idx in [1, 3, 5] else left_align
-
-    summary_ws.column_dimensions["A"].width = 6
-    summary_ws.column_dimensions["B"].width = 35
-    summary_ws.column_dimensions["C"].width = 14
-    summary_ws.column_dimensions["D"].width = 42
-    summary_ws.column_dimensions["E"].width = 14
-
-    existing_titles = {summary_ws.title}
-    student_headers = [
-        "STT",
-        "Ho va ten",
-        "Email",
-        "So dien thoai",
-        "Trang thai",
-        "Ngay dang ky",
-        "Ngay het han",
-    ]
-
-    for course in courses:
-        course_ws = wb.create_sheet(title=_build_unique_sheet_title(course.name, existing_titles))
-        course_ws.views.sheetView[0].showGridLines = True
-
-        enrollments = list(
-            course.enrollments.select_related("customer").order_by(
-                Lower("customer__full_name"),
-                Lower("customer__customer_email"),
-                "id",
-            )
-        )
-
-        course_ws.merge_cells("A1:G1")
-        course_ws["A1"] = course.name
-        course_ws["A1"].font = title_font
-        course_ws["A1"].alignment = left_align
-        course_ws.row_dimensions[1].height = 30
-
-        course_ws.merge_cells("A2:G2")
-        course_ws["A2"] = (
-            f"So hoc vien: {len(enrollments)}"
-            + (f" | Website: {course.web_link}" if course.web_link else "")
-        )
-        course_ws["A2"].font = meta_font
-        course_ws["A2"].alignment = left_align
-        course_ws.row_dimensions[2].height = 20
-        course_ws.row_dimensions[3].height = 10
-
-        for col_idx, header in enumerate(student_headers, 1):
-            cell = course_ws.cell(row=4, column=col_idx, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.alignment = center_align
-            cell.border = thin_border
-
-        current_row = 5
-        for idx, enrollment in enumerate(enrollments, 1):
-            student = enrollment.customer
-            status_text = (
-                "Hoat dong"
-                if enrollment.status == "ACTIVE"
-                else "Cho xu ly"
-                if enrollment.status == "PENDING"
-                else "Het han"
-            )
-            row_data = [
-                idx,
-                student.full_name or "-",
-                student.customer_email,
-                student.phone_number or "-",
-                status_text,
-                enrollment.registration_date.strftime("%d/%m/%Y") if enrollment.registration_date else "-",
-                enrollment.expiry_date.strftime("%d/%m/%Y") if enrollment.expiry_date else "-",
-            ]
-            for col_idx, value in enumerate(row_data, 1):
-                cell = course_ws.cell(row=current_row, column=col_idx, value=value)
-                cell.font = data_font
-                cell.border = thin_border
-                cell.alignment = center_align if col_idx in [1, 4, 5, 6, 7] else left_align
-            current_row += 1
-
-        course_ws.column_dimensions["A"].width = 6
-        course_ws.column_dimensions["B"].width = 25
-        course_ws.column_dimensions["C"].width = 30
-        course_ws.column_dimensions["D"].width = 15
-        course_ws.column_dimensions["E"].width = 15
-        course_ws.column_dimensions["F"].width = 15
-        course_ws.column_dimensions["G"].width = 15
-
-    response = HttpResponse(
-        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-    filename = f"danh_sach_khoa_hoc_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-    response["Content-Disposition"] = f'attachment; filename="{filename}"'
-    wb.save(response)
-    return response
-
-
 @csrf_exempt
 @api_login_required
 def api_dashboard_create(request: HttpRequest) -> JsonResponse:
     if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-
+        return JsonResponse({"error": "Phương thức không được hỗ trợ."}, status=405)
+    data, error = _json_body(request)
+    if error:
+        return error
     email = data.get("customer_email", "").strip().lower()
     if not email:
-        return JsonResponse({"error": "Email học viên không được để trống."}, status=400)
-
-    full_name = data.get("full_name", "").strip()
-    phone = normalize_phone_number(data.get("phone_number", ""))
-
-    customer, created = Customer.objects.get_or_create(
+        return JsonResponse({"error": "Email khách hàng không được để trống."}, status=400)
+    customer = Customer.objects.create(
         customer_email=email,
-        defaults={"full_name": full_name, "phone_number": phone},
+        full_name=data.get("full_name", "").strip(),
+        phone_number=normalize_phone_number(data.get("phone_number", "")),
+        registration_date=data.get("registration_date") or None,
+        expiry_date=data.get("expiry_date") or None,
+        status=data.get("status", "ACTIVE"),
+        is_staff=bool(data.get("is_staff", False)),
     )
-    if not created:
-        if full_name:
-            customer.full_name = full_name
-        if phone:
-            customer.phone_number = phone
-        customer.save()
-
-    # Process enrollments
-    enrollments_data = data.get("enrollments", [])
-    customer.enrollments.all().delete()
-    for enc in enrollments_data:
-        course_id = enc.get("course_id")
-        if not course_id:
-            continue
-        reg_date = _parse_date(enc.get("registration_date")) or timezone.localdate()
-        exp_date = _parse_date(enc.get("expiry_date")) or (reg_date + timedelta(days=365))
-        status = enc.get("status", "ACTIVE")
-        Enrollment.objects.create(customer=customer, course_id=course_id, registration_date=reg_date, expiry_date=exp_date, status=status)
-
-    customer.sync_overall_fields()
-    return JsonResponse({
-        "success": True,
-        "student": {
-            "id": customer.id,
-            "full_name": customer.full_name,
-            "customer_email": customer.customer_email,
-            "phone_number": customer.phone_number,
-            "status": customer.status,
-        },
-    })
+    return JsonResponse({"success": True, "student": _customer_payload(customer)})
 
 
 @csrf_exempt
 @api_login_required
 def api_dashboard_update(request: HttpRequest, id: int) -> JsonResponse:
     if request.method != "PUT":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
+        return JsonResponse({"error": "Phương thức không được hỗ trợ."}, status=405)
+    data, error = _json_body(request)
+    if error:
+        return error
     customer = get_object_or_404(Customer, id=id)
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-    email = data.get("customer_email", "").strip().lower()
-    full_name = data.get("full_name", "").strip()
-    phone = normalize_phone_number(data.get("phone_number", ""))
-
-    if email and email != customer.customer_email:
-        customer.customer_email = email
-    if full_name:
-        customer.full_name = full_name
-    if phone:
-        customer.phone_number = phone
+    if data.get("customer_email"):
+        customer.customer_email = data["customer_email"].strip().lower()
+    customer.full_name = data.get("full_name", customer.full_name).strip()
+    customer.phone_number = normalize_phone_number(data.get("phone_number", customer.phone_number))
+    customer.registration_date = data.get("registration_date") or customer.registration_date
+    customer.expiry_date = data.get("expiry_date") or customer.expiry_date
+    customer.status = data.get("status", customer.status)
+    customer.is_staff = bool(data.get("is_staff", customer.is_staff))
     customer.save()
-
-    enrollments_data = data.get("enrollments", [])
-    customer.enrollments.all().delete()
-    for enc in enrollments_data:
-        course_id = enc.get("course_id")
-        if not course_id:
-            continue
-        reg_date = _parse_date(enc.get("registration_date")) or timezone.localdate()
-        exp_date = _parse_date(enc.get("expiry_date")) or (reg_date + timedelta(days=365))
-        status = enc.get("status", "ACTIVE")
-        Enrollment.objects.create(customer=customer, course_id=course_id, registration_date=reg_date, expiry_date=exp_date, status=status)
-
-    customer.sync_overall_fields()
-    return JsonResponse({"success": True, "student": {"id": customer.id, "full_name": customer.full_name, "customer_email": customer.customer_email}})
+    return JsonResponse({"success": True, "student": _customer_payload(customer)})
 
 
 @csrf_exempt
@@ -790,125 +229,59 @@ def api_dashboard_delete(request: HttpRequest, id: int) -> JsonResponse:
     customer = get_object_or_404(Customer, id=id)
     email = customer.customer_email
     customer.delete()
-    return JsonResponse({"success": True, "message": f"Đã xóa học viên '{email}'."})
+    return JsonResponse({"success": True, "message": f"Đã xóa khách hàng '{email}'."})
+
+
+@csrf_exempt
+@api_login_required
+def api_customer_chatgpt_access_update(request: HttpRequest, id: int) -> JsonResponse:
+    if request.method != "PUT":
+        return JsonResponse({"error": "Phương thức không được hỗ trợ."}, status=405)
+    data, error = _json_body(request)
+    if error:
+        return error
+
+    customer = get_object_or_404(Customer, id=id)
+    account_ids = data.get("account_ids", [])
+    if not isinstance(account_ids, list):
+        return JsonResponse({"error": "Danh sách tài khoản không hợp lệ."}, status=400)
+
+    normalized_ids = sorted({int(account_id) for account_id in account_ids})
+    accounts = ChatGPTAccount.objects.filter(id__in=normalized_ids)
+    if accounts.count() != len(normalized_ids):
+        return JsonResponse({"error": "Có tài khoản ChatGPT không tồn tại."}, status=400)
+
+    customer.allowed_chatgpt_accounts.set(accounts)
+    return JsonResponse({"success": True, "customer": _customer_payload(customer)})
 
 
 @api_login_required
-def api_student_detail(request: HttpRequest, id: int) -> JsonResponse:
-    student = get_object_or_404(Customer.objects.prefetch_related("enrollments__course__links"), id=id)
-    enrollments = []
-    for e in student.enrollments.all():
-        enrollments.append({
-            "course_id": e.course_id,
-            "course_name": e.course.name,
-            "course_description": e.course.description,
-            "web_link": e.course.web_link,
-            "links": [{"title": l.title, "url": l.url} for l in e.course.links.all()],
-            "registration_date": str(e.registration_date) if e.registration_date else None,
-            "expiry_date": str(e.expiry_date) if e.expiry_date else None,
-            "status": e.status,
-        })
-
-    return JsonResponse({
-        "id": student.id,
-        "full_name": student.full_name,
-        "customer_email": student.customer_email,
-        "phone_number": student.phone_number,
-        "status": student.status,
-        "registration_date": str(student.registration_date) if student.registration_date else None,
-        "expiry_date": str(student.expiry_date) if student.expiry_date else None,
-        "telegram_chat_id": student.telegram_chat_id,
-        "is_verified_telegram": student.is_verified_telegram,
-        "created_at": student.created_at.isoformat(),
-        "enrollments": enrollments,
-    })
-
-
-@api_login_required
-def api_dashboard_stats(request: HttpRequest) -> JsonResponse:
-    total = Customer.objects.count()
-    active = Customer.objects.filter(status="ACTIVE").count()
-    pending = Customer.objects.filter(status="PENDING").count()
-    expired = Customer.objects.filter(status="EXPIRED").count()
-    total_courses = Course.objects.count()
-    return JsonResponse({
-        "total_students": total,
-        "active_count": active,
-        "pending_count": pending,
-        "expired_count": expired,
-        "total_courses": total_courses,
-    })
-
-
-
-@api_login_required
-def api_courses_list(request: HttpRequest) -> JsonResponse:
-    all_courses = request.GET.get("all", "false").lower() == "true"
-    sort_by = request.GET.get("sort_by", "created_at").strip()
-    sort_order = request.GET.get("sort_order", "desc").strip()
-
-    allowed_sorts = {
-        "name": Lower("name"),
-        "student_count": "student_count",
-        "created_at": "created_at",
-    }
-
-    sort_field = allowed_sorts.get(sort_by, "created_at")
-    if isinstance(sort_field, str):
-        if sort_order == "desc":
-            sort_field = f"-{sort_field}"
-        order_by_args = [sort_field, "-id"]
-    else:
-        if sort_order == "desc":
-            order_by_args = [sort_field.desc(), "-id"]
-        else:
-            order_by_args = [sort_field.asc(), "-id"]
-
-    qs = Course.objects.annotate(student_count=Count("customers")).order_by(*order_by_args)
-
+def api_chatgpt_accounts_list(request: HttpRequest) -> JsonResponse:
     query = request.GET.get("q", "").strip()
+    page_number = request.GET.get("page", 1)
+    all_accounts = request.GET.get("all", "false").lower() == "true"
+    qs = ChatGPTAccount.objects.order_by("email")
     if query:
-        qs = qs.filter(name__icontains=query)
-
-    if all_courses:
-        courses_data = []
-        for c in qs:
-            courses_data.append({
-                "id": c.id,
-                "name": c.name,
-                "description": c.description or "",
-                "web_link": c.web_link or "",
-                "student_count": c.student_count,
-                "created_at": c.created_at.isoformat(),
-            })
+        qs = qs.filter(email__icontains=query)
+    if all_accounts:
+        accounts = [_account_payload(account) for account in qs]
         return JsonResponse({
-            "courses": courses_data,
+            "accounts": accounts,
             "pagination": {
                 "current_page": 1,
                 "total_pages": 1,
                 "has_next": False,
                 "has_prev": False,
-                "total_count": len(courses_data),
+                "next_page_number": None,
+                "prev_page_number": None,
+                "total_count": len(accounts),
             },
         })
 
-    page_number = request.GET.get("page", 1)
     paginator = Paginator(qs, 10)
     page_obj = paginator.get_page(page_number)
-
-    courses_data = []
-    for c in page_obj:
-        courses_data.append({
-            "id": c.id,
-            "name": c.name,
-            "description": c.description or "",
-            "web_link": c.web_link or "",
-            "student_count": c.student_count,
-            "created_at": c.created_at.isoformat(),
-        })
-
     return JsonResponse({
-        "courses": courses_data,
+        "accounts": [_account_payload(account) for account in page_obj],
         "pagination": {
             "current_page": page_obj.number,
             "total_pages": paginator.num_pages,
@@ -923,163 +296,46 @@ def api_courses_list(request: HttpRequest) -> JsonResponse:
 
 @csrf_exempt
 @api_login_required
-def api_courses_create(request: HttpRequest) -> JsonResponse:
+def api_chatgpt_accounts_create(request: HttpRequest) -> JsonResponse:
     if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-    name = data.get("name", "").strip()
-    if not name:
-        return JsonResponse({"error": "Tên khóa học không được để trống."}, status=400)
-
-    course = Course.objects.create(
-        name=name,
-        description=data.get("description", "").strip(),
-        web_link=data.get("web_link", "").strip(),
+        return JsonResponse({"error": "Phương thức không được hỗ trợ."}, status=405)
+    data, error = _json_body(request)
+    if error:
+        return error
+    account = ChatGPTAccount.objects.create(
+        email=data.get("email", "").strip().lower(),
+        password=data.get("password", ""),
+        imap_host=data.get("imap_host", "imap.gmail.com").strip() or "imap.gmail.com",
+        imap_port=int(data.get("imap_port") or 993),
+        imap_user=data.get("imap_user", "").strip() or None,
+        imap_password=data.get("imap_password", ""),
+        status=data.get("status", "ACTIVE"),
     )
-    for link in data.get("links", []):
-        title = link.get("title", "").strip()
-        url = link.get("url", "").strip()
-        if title and url:
-            CourseLink.objects.create(course=course, title=title, url=url)
-
-    return JsonResponse({"success": True, "course": {"id": course.id, "name": course.name}})
+    return JsonResponse({"success": True, "account": _account_payload(account)})
 
 
 @csrf_exempt
 @api_login_required
-def api_courses_update(request: HttpRequest, id: int) -> JsonResponse:
+def api_chatgpt_accounts_update(request: HttpRequest, id: int) -> JsonResponse:
     if request.method != "PUT":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-    course = get_object_or_404(Course, id=id)
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-    if data.get("name"):
-        course.name = data["name"].strip()
-    course.description = data.get("description", "").strip()
-    course.web_link = data.get("web_link", "").strip()
-    course.save()
-
-    course.links.all().delete()
-    for link in data.get("links", []):
-        title = link.get("title", "").strip()
-        url = link.get("url", "").strip()
-        if title and url:
-            CourseLink.objects.create(course=course, title=title, url=url)
-
-    return JsonResponse({"success": True, "course": {"id": course.id, "name": course.name}})
+        return JsonResponse({"error": "Phương thức không được hỗ trợ."}, status=405)
+    data, error = _json_body(request)
+    if error:
+        return error
+    account = get_object_or_404(ChatGPTAccount, id=id)
+    for field in ["email", "password", "imap_host", "imap_password", "status"]:
+        if field in data:
+            setattr(account, field, data[field].strip().lower() if field == "email" else data[field])
+    account.imap_port = int(data.get("imap_port") or account.imap_port)
+    account.imap_user = data.get("imap_user", account.imap_user) or None
+    account.save()
+    return JsonResponse({"success": True, "account": _account_payload(account)})
 
 
 @csrf_exempt
 @api_login_required
-def api_courses_delete(request: HttpRequest, id: int) -> JsonResponse:
-    course = get_object_or_404(Course, id=id)
-    name = course.name
-    course.delete()
-    return JsonResponse({"success": True, "message": f"Đã xóa khóa học '{name}'."})
-
-
-@api_login_required
-def api_course_detail_json(request: HttpRequest, id: int) -> JsonResponse:
-    course = get_object_or_404(Course, id=id)
-    student_count = Enrollment.objects.filter(course=course).count()
-    links_data = [{"title": l.title, "url": l.url} for l in course.links.all()]
-
-    enrollments = Enrollment.objects.filter(course=course).select_related("customer")
-    students_data = []
-    for e in enrollments:
-        students_data.append({
-            "email": e.customer.customer_email,
-            "name": e.customer.full_name or "Học viên",
-            "registration_date": str(e.registration_date) if e.registration_date else "",
-            "expiry_date": str(e.expiry_date) if e.expiry_date else "",
-            "status": e.status,
-        })
-
-    return JsonResponse({
-        "course": {
-            "id": course.id,
-            "name": course.name,
-            "description": course.description or "",
-            "web_link": course.web_link or "",
-            "links": links_data,
-            "created_at": course.created_at.isoformat(),
-        },
-        "student_count": student_count,
-        "students": students_data,
-    })
-
-
-# ─── API: Enroll ──────────────────────────────────────────────────────────────
-
-@csrf_exempt
-@api_login_required
-def api_enroll_student(request: HttpRequest) -> JsonResponse:
-    if request.method != "POST":
-        return JsonResponse({"error": "Method not allowed"}, status=405)
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "Invalid JSON"}, status=400)
-
-    course_id = data.get("course_id")
-    student_id = data.get("student_id")
-    course = get_object_or_404(Course, id=course_id)
-
-    today = timezone.localdate()
-    reg_date = _parse_date(data.get("registration_date")) or today
-    exp_date = _parse_date(data.get("expiry_date")) or (reg_date + timedelta(days=365))
-    status = data.get("status", "ACTIVE")
-
-    if student_id:
-        student = get_object_or_404(Customer, id=student_id)
-    else:
-        email = data.get("customer_email", "").strip().lower()
-        if not email:
-            return JsonResponse({"error": "Email học viên không được để trống."}, status=400)
-        full_name = data.get("full_name", "").strip()
-        phone = normalize_phone_number(data.get("phone_number", ""))
-        student, _ = Customer.objects.get_or_create(
-            customer_email=email,
-            defaults={"full_name": full_name, "phone_number": phone},
-        )
-
-    enrollment, created = Enrollment.objects.update_or_create(
-        customer=student,
-        course=course,
-        defaults={"registration_date": reg_date, "expiry_date": exp_date, "status": status},
-    )
-    student.sync_overall_fields()
-
-    return JsonResponse({
-        "success": True,
-        "enrollment": {
-            "id": enrollment.id,
-            "course_id": enrollment.course_id,
-            "customer_id": enrollment.customer_id,
-            "registration_date": str(enrollment.registration_date),
-            "expiry_date": str(enrollment.expiry_date),
-            "status": enrollment.status,
-            "created": created,
-        },
-    })
-
-
-
-
-
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
-def _parse_date(value: str | None):
-    if not value:
-        return None
-    try:
-        return datetime.strptime(value, "%Y-%m-%d").date()
-    except ValueError:
-        return None
+def api_chatgpt_accounts_delete(request: HttpRequest, id: int) -> JsonResponse:
+    account = get_object_or_404(ChatGPTAccount, id=id)
+    email = account.email
+    account.delete()
+    return JsonResponse({"success": True, "message": f"Đã xóa tài khoản ChatGPT '{email}'."})

@@ -8,6 +8,9 @@ export interface Student {
   expiry_date: string | null;
   telegram_chat_id?: number | null;
   is_verified_telegram?: boolean;
+  is_staff?: boolean;
+  allowed_chatgpt_account_ids?: number[];
+  chatgpt_access_mode?: 'default' | 'custom';
   created_at?: string;
   enrollments?: EnrollmentDetail[];
 }
@@ -31,7 +34,12 @@ export interface StudentListItem {
   status: 'ACTIVE' | 'PENDING' | 'EXPIRED';
   registration_date: string | null;
   expiry_date: string | null;
-  enrollments: EnrollmentDetail[];
+  telegram_chat_id?: number | null;
+  is_verified_telegram?: boolean;
+  is_staff?: boolean;
+  allowed_chatgpt_account_ids?: number[];
+  chatgpt_access_mode?: 'default' | 'custom';
+  enrollments?: EnrollmentDetail[];
 }
 
 export interface StudentSearchResult {

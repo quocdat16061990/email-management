@@ -7,7 +7,6 @@ import { useLogin } from '../hooks/useAuth'
 import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-// Mock dependencies
 vi.mock('../context/AuthContext', () => ({
   useAuth: vi.fn(),
 }))
@@ -20,30 +19,28 @@ vi.mock('../components/shared/Toast', () => ({
   showToast: vi.fn(),
 }))
 
-const queryClient = new QueryClient()
-
 function renderLoginPage() {
+  const queryClient = new QueryClient()
   return render(
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
         <LoginPage />
       </BrowserRouter>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   )
 }
 
 describe('pages/LoginPage.tsx', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    
-    // Set default mock implementations
+
     vi.mocked(useAuth).mockReturnValue({
       isAuthenticated: false,
       isLoading: false,
       operatorEmail: '',
       checkAuth: vi.fn(),
     })
-    
+
     vi.mocked(useLogin).mockReturnValue({
       mutate: vi.fn(),
       isPending: false,
@@ -52,8 +49,8 @@ describe('pages/LoginPage.tsx', () => {
 
   test('renders form elements correctly', () => {
     renderLoginPage()
-    
-    expect(screen.getByRole('heading', { name: /Anh Lap Trinh/i })).toBeInTheDocument()
+
+    expect(screen.getByRole('heading', { name: /Anh Lập Trình/i })).toBeInTheDocument()
     expect(screen.getByText('Email')).toBeInTheDocument()
     expect(screen.getByText('Mật khẩu')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('admin@example.com')).toBeInTheDocument()
@@ -70,17 +67,17 @@ describe('pages/LoginPage.tsx', () => {
     })
 
     const { container } = renderLoginPage()
-    
+
     const spinner = container.querySelector('.animate-spin')
     expect(spinner).toBeInTheDocument()
   })
 
   test('displays validation errors when fields are submitted empty', async () => {
     const { container } = renderLoginPage()
-    
+
     const form = container.querySelector('form')!
     fireEvent.submit(form)
-    
+
     expect(await screen.findByText('Email không được để trống')).toBeInTheDocument()
     expect(await screen.findByText('Mật khẩu không được để trống')).toBeInTheDocument()
   })
@@ -88,13 +85,13 @@ describe('pages/LoginPage.tsx', () => {
   test('displays email validation error when email format is invalid', async () => {
     const { container } = renderLoginPage()
     const user = userEvent.setup()
-    
+
     const emailInput = screen.getByPlaceholderText('admin@example.com')
     await user.type(emailInput, 'invalid-email')
-    
+
     const form = container.querySelector('form')!
     fireEvent.submit(form)
-    
+
     expect(await screen.findByText('Email không hợp lệ')).toBeInTheDocument()
   })
 
@@ -104,23 +101,23 @@ describe('pages/LoginPage.tsx', () => {
       mutate: mockMutate,
       isPending: false,
     } as any)
-    
+
     const { container } = renderLoginPage()
     const user = userEvent.setup()
-    
+
     const emailInput = screen.getByPlaceholderText('admin@example.com')
     const passwordInput = screen.getByPlaceholderText('••••••••')
-    
+
     await user.type(emailInput, '  admin@example.com  ')
     await user.type(passwordInput, 'secretpassword')
-    
+
     const form = container.querySelector('form')!
     fireEvent.submit(form)
-    
+
     await waitFor(() => {
       expect(mockMutate).toHaveBeenCalledWith(
         { email: 'admin@example.com', password: 'secretpassword' },
-        expect.any(Object)
+        expect.any(Object),
       )
     })
   })

@@ -7,9 +7,7 @@ import LoadingSpinner from './components/shared/LoadingSpinner'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
-const StudentDetailPage = lazy(() => import('./pages/StudentDetailPage'))
-const CoursesPage = lazy(() => import('./pages/CoursesPage'))
-const CourseDetailPage = lazy(() => import('./pages/CourseDetailPage'))
+const ChatGPTAccountsPage = lazy(() => import('./pages/ChatGPTAccountsPage'))
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,7 +27,7 @@ export default function App() {
           <Suspense
             fallback={
               <div className="flex min-h-screen items-center justify-center bg-gray-50">
-                <LoadingSpinner text="Dang tai giao dien..." />
+                <LoadingSpinner text="Đang tải giao diện..." />
               </div>
             }
           >
@@ -37,9 +35,7 @@ export default function App() {
               <Route path="/login" element={<LoginPage />} />
               <Route element={<ProtectedRoute />}>
                 <Route path="/dashboard" element={<DashboardPage />} />
-                <Route path="/students/:id" element={<StudentDetailPage />} />
-                <Route path="/courses" element={<CoursesPage />} />
-                <Route path="/courses/:id" element={<CourseDetailPage />} />
+                <Route path="/chatgpt-accounts" element={<ChatGPTAccountsPage />} />
               </Route>
               <Route path="*" element={<Navigate to="/dashboard" replace />} />
             </Routes>
