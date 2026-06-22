@@ -5,7 +5,6 @@ import {
   createStudent,
   updateStudent,
   deleteStudent,
-  syncStudents,
   searchStudents,
   exportStudents,
   type CreateStudentInput,
@@ -70,17 +69,6 @@ export function useDeleteStudent() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => deleteStudent(id),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['students'] })
-      qc.invalidateQueries({ queryKey: ['dashboard-stats'] })
-    },
-  })
-}
-
-export function useSyncStudents() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => syncStudents(),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['students'] })
       qc.invalidateQueries({ queryKey: ['dashboard-stats'] })

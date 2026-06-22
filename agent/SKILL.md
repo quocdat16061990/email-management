@@ -1,12 +1,12 @@
 ---
 name: email-management
-description: Thiết lập và đồng bộ toàn bộ hệ thống Anhlaptrinh Management trên máy mới. Dùng khi người dùng yêu cầu "cài đặt", "setup", "đồng bộ Voomly", "migrate database", "chạy hệ thống", "cài đặt môi trường". Bao gồm: kiểm tra môi trường Python/Node, tạo .env, cài thư viện backend + frontend, migrate Supabase, đồng bộ khóa học & học viên từ Voomly, chạy 3 thành phần (Django + React + Telegram Bot).
+description: Thiết lập toàn bộ hệ thống Anhlaptrinh Management trên máy mới. Dùng khi người dùng yêu cầu "cài đặt", "setup", "migrate database", "chạy hệ thống", "cài đặt môi trường". Bao gồm: kiểm tra môi trường Python/Node, tạo .env, cài thư viện backend + frontend, migrate Supabase, chạy 3 thành phần (Django + React + Telegram Bot).
 ---
 
 # skill_setup_email_management
 
-> Kỹ năng thiết lập và đồng bộ toàn bộ hệ thống **Anhlaptrinh Management** trên máy mới.
-> Dành cho Claude Code / Codex Agent khi được yêu cầu "cài đặt", "setup", "đồng bộ", "migrate", "chạy hệ thống".
+> Kỹ năng thiết lập toàn bộ hệ thống **Anhlaptrinh Management** trên máy mới.
+> Dành cho Claude Code / Codex Agent khi được yêu cầu "cài đặt", "setup", "migrate", "chạy hệ thống".
 
 ---
 
@@ -31,7 +31,6 @@ description: Thiết lập và đồng bộ toàn bộ hệ thống Anhlaptrinh 
 | `TELEGRAM_BOT_TOKEN` | Tạo bot tại [@BotFather](https://t.me/BotFather) → gửi `/newbot` → nhận token |
 | `EMAIL_ACCOUNT` + `APP_PASSWORD` | Gmail → Quản lý Tài khoản → Bảo mật → Mật khẩu ứng dụng |
 | `DB_HOST`...`DB_PASSWORD` | [Supabase](https://supabase.com) → New Project → Project Settings → Database → Connection string |
-| `VOOMLY_BEARER_TOKEN` | Voomly Dashboard → Settings → API Token |
 
 ---
 
@@ -62,7 +61,6 @@ cp .env.example .env
 - `TELEGRAM_BOT_TOKEN` — không được để trống hoặc giá trị mẫu
 - `EMAIL_ACCOUNT` + `APP_PASSWORD` — không được để trống
 - `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` — đủ 5 trường
-- `VOOMLY_BEARER_TOKEN` — có thể để trống nhưng sẽ không đồng bộ Voomly
 
 Nếu thiếu, yêu cầu người dùng cung cấp trước khi tiếp tục.
 
@@ -97,27 +95,7 @@ python manage.py showmigrations
 # Tất cả phải có dấu [X]
 ```
 
-#### Bước 6: Đồng bộ dữ liệu từ Voomly
-
-```bash
-python -c "
-import os, django, time
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-django.setup()
-from botapp.services import sync_courses_from_voomly, sync_all_students_from_voomly
-from botapp.models import Course, Customer
-
-print('Đồng bộ khóa học...')
-r1 = sync_courses_from_voomly()
-print(f'OK: {r1[\"total\"]} khóa học')
-
-print('Đồng bộ học viên...')
-r2 = sync_all_students_from_voomly()
-print(f'OK: {r2[\"total_students\"]} học viên')
-"
-```
-
-#### Bước 7: Khởi động ứng dụng (3 terminal riêng)
+#### Bước 6: Khởi động ứng dụng (3 terminal riêng)
 
 ```bash
 # Terminal 1 — Backend
@@ -138,7 +116,7 @@ python manage.py run_otp_bot
 Email-Management/
 ├── botapp/                    # Backend Python
 │   ├── bot.py                 # Telegram bot
-│   ├── services.py            # Logic đồng bộ Voomly, OTP, lookup
+│   ├── services.py            # Business logic (OTP, lookup)
 │   ├── models.py              # Course, Customer, Enrollment
 │   ├── views.py               # API endpoints
 │   └── urls.py                # URL routing
@@ -151,7 +129,6 @@ Email-Management/
 ├── setup.bat                  # Script cài Windows
 ├── setup.sh                   # Script cài Linux/Mac
 ├── SKILL.md                   # File này
-├── VOOMLY_SYNC_GUIDE.md       # Tài liệu đồng bộ Voomly
 └── SUMMARY_FOR_BOSS.md        # Báo cáo cho sếp
 ```
 
@@ -185,24 +162,6 @@ from django.db import connection
 connection.ensure_connection()
 print('DB OK')
 "
-
-# Đồng bộ Voomly (khóa học)
-python -c "
-import os, django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-django.setup()
-from botapp.services import sync_courses_from_voomly
-print(sync_courses_from_voomly())
-"
-
-# Đồng bộ Voomly (học viên)
-python -c "
-import os, django
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-django.setup()
-from botapp.services import sync_all_students_from_voomly
-print(sync_all_students_from_voomly())
-"
 ```
 
 ---
@@ -221,4 +180,3 @@ print(sync_all_students_from_voomly())
 - Xác định HĐH trước khi chạy lệnh
 - Đường dẫn linh hoạt, không hardcode
 - Kiểm tra `.env` trước mọi thao tác
-- Đồng bộ Voomly là bước bắt buộc sau migrate

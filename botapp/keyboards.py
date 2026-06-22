@@ -2,10 +2,11 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 def main_menu_keyboard(is_admin: bool = False) -> InlineKeyboardMarkup:
+    otp_button_text = "🔑 Lấy danh sách Email OTP ChatGPT" if is_admin else "🔑 Lấy mã OTP OpenAI"
     buttons = [
         [InlineKeyboardButton("👤 Thông tin của tôi", callback_data="my_info")],
         [InlineKeyboardButton("📚 Khóa học của tôi", callback_data="my_courses")],
-        [InlineKeyboardButton("🔑 Lấy mã OTP OpenAI", callback_data="fetch_openai_otp")],
+        [InlineKeyboardButton(otp_button_text, callback_data="fetch_openai_otp")],
     ]
     if is_admin:
         buttons.append([InlineKeyboardButton("➕ Thêm người mới", callback_data="admin_add_user")])
@@ -86,7 +87,7 @@ def restart_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def chatgpt_accounts_keyboard(accounts: list) -> InlineKeyboardMarkup:
+def chatgpt_accounts_keyboard(accounts: list, show_back_to_list: bool = False) -> InlineKeyboardMarkup:
     buttons = []
     for acc in accounts:
         buttons.append([
@@ -95,6 +96,8 @@ def chatgpt_accounts_keyboard(accounts: list) -> InlineKeyboardMarkup:
                 callback_data=f"get_chatgpt_otp_{acc.id}"
             )
         ])
+    if show_back_to_list:
+        buttons.append([InlineKeyboardButton("🔙 Quay lại Danh sách", callback_data="view_accounts")])
     buttons.append([InlineKeyboardButton("🔙 Quay lại Menu", callback_data="main_menu")])
     return InlineKeyboardMarkup(buttons)
 

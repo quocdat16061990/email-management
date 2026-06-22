@@ -94,8 +94,8 @@ export default function EnrollStudentModal({ courseId, courseName, onClose, onSu
         expiry_date: data.expiry_date,
         status: data.status,
       }, {
-        onSuccess: (res) => {
-          showToast('success', `Đã đăng ký học viên vào khóa học.${res.voomly_synced ? ' (đã đồng bộ Voomly)' : ''}`)
+        onSuccess: () => {
+          showToast('success', 'Đã đăng ký học viên vào khóa học.')
           onSuccess()
         },
         onError: (err: Error) => showToast('error', err.message),
@@ -110,8 +110,8 @@ export default function EnrollStudentModal({ courseId, courseName, onClose, onSu
         expiry_date: data.expiry_date,
         status: data.status,
       }, {
-        onSuccess: (res) => {
-          showToast('success', `Đã thêm học viên vào khóa học.${res.voomly_synced ? ' (đã đồng bộ Voomly)' : ''}`)
+        onSuccess: () => {
+          showToast('success', 'Đã thêm học viên vào khóa học.')
           onSuccess()
         },
         onError: (err: Error) => showToast('error', err.message),

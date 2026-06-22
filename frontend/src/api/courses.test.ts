@@ -7,7 +7,6 @@ import {
   createCourse,
   updateCourse,
   deleteCourse,
-  syncCourses,
   enrollStudent,
   updateCourseWebsite,
 } from './courses'
@@ -32,7 +31,7 @@ const server = setupServer(
     return HttpResponse.json({
       course: { id: 1, name: 'React Test' },
       student_count: 5,
-      voomly_students: [],
+      students: [],
     })
   }),
 
@@ -50,9 +49,6 @@ const server = setupServer(
     return HttpResponse.json({ success: true, message: 'Deleted' })
   }),
 
-  http.post('/api/sync/courses/', () => {
-    return HttpResponse.json({ success: true, result: { total: 10, created: 2, updated: 8 } })
-  }),
 
   http.post('/api/enroll/', async ({ request }) => {
     const body = (await request.json()) as any
@@ -67,7 +63,6 @@ const server = setupServer(
         status: 'ACTIVE',
         created: true
       },
-      voomly_synced: true,
     })
   }),
 
@@ -95,7 +90,7 @@ describe('api/courses.ts', () => {
   })
 
   test('createCourse makes a post request to create new course', async () => {
-    const res = await createCourse({ name: 'Vue Test', spotlight_id: 'vue-id' })
+    const res = await createCourse({ name: 'Vue Test' })
     expect(res.success).toBe(true)
     expect(res.course.id).toBe(2)
     expect(res.course.name).toBe('Vue Test')
@@ -113,17 +108,11 @@ describe('api/courses.ts', () => {
     expect(res.message).toBe('Deleted')
   })
 
-  test('syncCourses requests course sync from voomly', async () => {
-    const res = await syncCourses()
-    expect(res.success).toBe(true)
-    expect(res.result.total).toBe(10)
-  })
 
   test('enrollStudent sends enrollment request', async () => {
     const res = await enrollStudent({ course_id: 1, student_id: 456 })
     expect(res.success).toBe(true)
     expect(res.enrollment.customer_id).toBe(456)
-    expect(res.voomly_synced).toBe(true)
   })
 
   test('updateCourseWebsite updates course web link', async () => {

@@ -6,7 +6,7 @@ import StatusBadge from '../components/shared/StatusBadge'
 import LoadingSpinner from '../components/shared/LoadingSpinner'
 import ErrorState from '../components/shared/ErrorState'
 import { showToast } from '../components/shared/Toast'
-import type { CourseLink, VoomlyStudent } from '../types/course'
+import type { CourseLink } from '../types/course'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -43,7 +43,7 @@ export default function CourseDetailPage() {
   if (isLoading) return <LoadingSpinner />
   if (isError || !data) return <ErrorState onRetry={() => refetch()} />
 
-  const { course, student_count, voomly_students, voomly_error } = data
+  const { course, student_count, students } = data
 
   const onSubmit = (data: QuickEnrollValues) => {
     enrollMutation.mutate({
@@ -55,8 +55,8 @@ export default function CourseDetailPage() {
       expiry_date: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
       status: 'ACTIVE',
     }, {
-      onSuccess: (res) => {
-        showToast('success', `Đã thêm học viên.${res.voomly_synced ? ' (đã đồng bộ Voomly)' : ''}`)
+      onSuccess: () => {
+        showToast('success', 'Đã thêm học viên.')
         setShowEnroll(false)
         reset()
         refetch()
@@ -121,12 +121,12 @@ export default function CourseDetailPage() {
           </div>
         </div>
 
-        {/* Voomly Students */}
+        {/* Students list */}
         <div className="lg:col-span-2 space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-lg font-bold text-gray-900">Danh sách học viên từ Voomly</h3>
-              <p className="text-sm text-gray-500">Hiển thị trực tiếp học viên đang có trong khóa học trên Voomly.</p>
+              <h3 className="text-lg font-bold text-gray-900">Danh sách học viên đăng ký</h3>
+              <p className="text-sm text-gray-500">Hiển thị danh sách học viên đang đăng ký khóa học.</p>
             </div>
             <button onClick={() => setShowEnroll(!showEnroll)}
               className="px-4 py-2 rounded-xl bg-gradient-to-r from-brand-500 to-accent-600 text-white text-sm font-medium hover:shadow-lg transition-all shadow-sm">
@@ -167,14 +167,7 @@ export default function CourseDetailPage() {
             </form>
           )}
 
-          {/* Voomly error */}
-          {voomly_error && (
-            <div className="p-4 rounded-xl bg-red-50 border border-red-100 text-sm text-red-700">
-              Không tải được danh sách học viên từ Voomly: {voomly_error}
-            </div>
-          )}
-
-          {/* Voomly student table */}
+          {/* Student table */}
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -188,10 +181,10 @@ export default function CourseDetailPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {(!voomly_students || voomly_students.length === 0) ? (
-                    <tr><td colSpan={5} className="text-center py-8 text-sm text-gray-400 italic">Chưa có học viên nào trên Voomly.</td></tr>
+                  {(!students || students.length === 0) ? (
+                    <tr><td colSpan={5} className="text-center py-8 text-sm text-gray-400 italic">Chưa có học viên nào đăng ký.</td></tr>
                   ) : (
-                    voomly_students.map((s: VoomlyStudent, i: number) => (
+                    students.map((s, i: number) => (
                       <tr key={i} className="hover:bg-gray-50/50 transition-colors">
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">

@@ -8,7 +8,6 @@ import { z } from 'zod'
 
 const courseSchema = z.object({
   name: z.string().trim().min(1, 'Tên khóa học không được để trống'),
-  spotlight_id: z.string().trim().optional(),
   description: z.string().trim().optional(),
   web_link: z.string().trim().optional().refine(val => !val || val.startsWith('http://') || val.startsWith('https://'), {
     message: 'Link website phải bắt đầu bằng http:// hoặc https://',
@@ -38,7 +37,6 @@ export default function CourseFormModal({ course, onClose, onSuccess }: Props) {
     resolver: zodResolver(courseSchema),
     defaultValues: {
       name: '',
-      spotlight_id: '',
       description: '',
       web_link: '',
       links: [],
@@ -54,7 +52,6 @@ export default function CourseFormModal({ course, onClose, onSuccess }: Props) {
     if (course) {
       reset({
         name: course.name || '',
-        spotlight_id: course.spotlight_id || '',
         description: course.description || '',
         web_link: course.web_link || '',
         links: course.links || [],
@@ -65,7 +62,6 @@ export default function CourseFormModal({ course, onClose, onSuccess }: Props) {
   const onSubmit = (data: CourseFormValues) => {
     const payload = {
       name: data.name.trim(),
-      spotlight_id: data.spotlight_id?.trim() || '',
       description: data.description?.trim() || '',
       web_link: data.web_link?.trim() || '',
       links: (data.links || []).filter((l) => l.title.trim() && l.url.trim()),
@@ -102,11 +98,6 @@ export default function CourseFormModal({ course, onClose, onSuccess }: Props) {
             <input type="text" {...register('name')}
               className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20" />
             {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name.message}</p>}
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">Spotlight ID</label>
-            <input type="text" {...register('spotlight_id')} placeholder="Ví dụ: rwbteni8pn"
-              className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20" />
           </div>
           <div>
             <label className="block text-sm font-semibold text-gray-700 mb-1">Link website</label>

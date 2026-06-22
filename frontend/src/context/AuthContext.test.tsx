@@ -49,7 +49,6 @@ describe('context/AuthContext.tsx', () => {
       pending_count: 0,
       expired_count: 20,
       total_courses: 5,
-      total_voomly_courses: 5,
     })
 
     renderWithQuery(

@@ -101,7 +101,6 @@ TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 EMAIL_ACCOUNT = os.getenv("EMAIL_ACCOUNT", "")
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 OTP_TTL_MINUTES = int(os.getenv("OTP_TTL_MINUTES", "1"))
-VOOMLY_BEARER_TOKEN = os.getenv("VOOMLY_BEARER_TOKEN", "")
 
 LOGGING = {
     "version": 1,

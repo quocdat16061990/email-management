@@ -1,6 +1,6 @@
 # 🎓 Anhlaptrinh Management — Hệ thống Quản lý Học viên & Bot Telegram OTP
 
-> **Mô tả dự án:** Hệ thống quản lý học viên tập trung, tự động hóa việc lấy mã OTP OpenAI qua Telegram, đồng bộ dữ liệu khóa học & học viên từ Voomly. Giao diện web dashboard hiện đại (React SPA) giúp admin quản lý học viên, khóa học, đăng ký — tất cả trên một nền tảng duy nhất.
+> **Mô tả dự án:** Hệ thống quản lý học viên tập trung, tự động hóa việc lấy mã OTP OpenAI qua Telegram, Giao diện web dashboard hiện đại (React SPA) giúp admin quản lý học viên, khóa học, đăng ký — tất cả trên một nền tảng duy nhất.
 
 ---
 
@@ -8,7 +8,6 @@
 
 1. **OTP OpenAI thủ công** — Trước đây học viên phải tự tay lấy mã OTP từ Gmail → mất thời gian, sai sót. Bot Telegram tự động quét Gmail, trả OTP trong 5-30 giây.
 2. **Quản lý học viên rời rạc** — Không có dashboard tập trung. Nay admin xem được toàn bộ học viên, khóa học, trạng thái đăng ký trên một giao diện web.
-3. **Đồng bộ Voomly thủ công** — Khóa học & học viên từ Voomly trước đây phải nhập tay. Nay click 1 nút là đồng bộ tự động 100+ khóa học, 4000+ học viên trong ~35 giây.
 4. **Tra cứu chậm** — Học viên gọi điện hỏi thông tin → admin lookup Telegram, có ngay email, tên, SĐT, khóa học, trạng thái.
 
 ### 📊 Lợi ích kinh doanh
@@ -16,7 +15,6 @@
 | Chỉ tiêu | Trước | Sau |
 |---|---|---|
 | Thời gian lấy OTP | 2-5 phút (thủ công) | 5-30 giây (tự động) |
-| Đồng bộ khóa học Voomly | Nhập tay, không đồng bộ | 1 click, ~35 giây |
 | Tra cứu học viên | Mở DB / hỏi lại | /lookup Telegram, 1 giây |
 | Giao diện quản lý | Không có | Dashboard React SPA |
 | Load lại trang khi thao tác | Có (Django templates) | Không (React SPA mượt mà) |
@@ -37,7 +35,7 @@ Người dùng cuối (Học viên)               Admin (Nhân viên)
                          ▼
                ┌──────────────────┐
                │  Django Backend  │ ←── Supabase PostgreSQL
-               │  (REST API)      │ ←── Voomly API
+               │  (REST API)      │
                └──────────────────┘
 
 ---
@@ -65,10 +63,7 @@ Trình duyệt (React SPA @ localhost:5173)
          │
          ├── /api/*  ──proxy──>  Django API @ :8000
          │
-         ├── Telegram Bot ──>    Django @ :8000
-         │
-         └── Voomly API ──>     Django ──> api.voomly.com
-
+         └── Telegram Bot ──>    Django @ :8000
 Database: Supabase PostgreSQL / SQLite
 ```
 
@@ -76,7 +71,6 @@ Database: Supabase PostgreSQL / SQLite
 
 1. **Web Dashboard**: React gọi API Django → Django query DB → trả JSON
 2. **Telegram Bot**: User nhập email → Bot lưu chat_id → User gửi OTP → Bot quét Gmail → trả OTP
-3. **Đồng bộ Voomly**: Django gọi API Voomly → đồng bộ khóa học & học viên → bulk insert/update DB
 
 ---
 
@@ -87,7 +81,7 @@ Database: Supabase PostgreSQL / SQLite
 ├── botapp/                        # Ứng dụng Django chính
 │   ├── bot.py                     # Telegram bot handlers
 │   ├── keyboards.py               # Inline keyboard Telegram
-│   ├── services.py                # Business logic (Voomly, OTP, lookup)
+│   ├── services.py                # Business logic (OTP, lookup)
 │   ├── models.py                  # Course, Customer, Enrollment, CourseLink
 │   ├── views.py                   # API endpoints (HTML + JSON)
 │   ├── urls.py                    # URL routing
@@ -186,8 +180,6 @@ DB_NAME=postgres
 DB_USER=postgres.xxxxx
 DB_PASSWORD=your_password
 
-# ─── Voomly API ─────────────────────────────
-VOOMLY_BEARER_TOKEN=your_voomly_token
 
 # ─── React Frontend URL (CORS) ──────────────
 FRONTEND_URL=http://localhost:5173
@@ -262,17 +254,16 @@ Mở `http://localhost:5173/` (hoặc `http://127.0.0.1:8000/` sẽ redirect san
 
 | Route | Chức năng |
 |---|---|
-| `/dashboard` | Quản lý học viên (thêm, sửa, xóa, tìm kiếm, đồng bộ Voomly) |
+| `/dashboard` | Quản lý học viên (thêm, sửa, xóa, tìm kiếm) |
 | `/students/:id` | Chi tiết học viên + danh sách khóa học đã đăng ký |
-| `/courses` | Quản lý khóa học (thêm, sửa, xóa, đồng bộ từ Voomly) |
-| `/courses/:id` | Chi tiết khóa học + danh sách học viên từ Voomly |
+| `/courses` | Quản lý khóa học (thêm, sửa, xóa) |
+| `/courses/:id` | Chi tiết khóa học + danh sách học viên |
 
 ### Tính năng chính
 
 - **Thêm học viên**: Form modal với chọn khóa học + ngày đăng ký/hết hạn
 - **Tìm kiếm**: Debounce 300ms, tìm theo tên/email/SĐT
 - **Phân trang**: 10 items/trang
-- **Đồng bộ Voomly**: Button "Đồng bộ từ Voomly" — gọi API song song, bulk insert
 - **Thêm học viên vào khóa học**: Tìm kiếm học viên có sẵn hoặc tạo mới
 
 ---
@@ -322,53 +313,6 @@ Sau khi liên kết thành công, bot hiển thị menu:
 
 ---
 
-## 🔄 Đồng bộ Voomly
-
-### API Endpoints
-
-| Chức năng | Method | URL |
-|---|---|---|
-| Đồng bộ khóa học | POST | `/api/sync/courses/` |
-| Đồng bộ học viên | POST | `/api/sync/students/` |
-| Lấy danh sách khóa học | GET | `/api/courses/` |
-| Chi tiết khóa học + Voomly students | GET | `/api/courses/:id/` |
-
-### Kiến trúc đồng bộ
-
-```
-sync_all_students_from_voomly()
-│
-├── Bước 1: ThreadPoolExecutor (15 workers)
-│   └── fetch_students_for_course() — chỉ gọi HTTP, không ORM
-│
-├── Bước 2: In-memory Matching
-│   ├── Load all existing Customers by email
-│   └── Load all existing Enrollments by (customer, course)
-│
-└── Bước 3: Bulk DB operations
-    ├── bulk_create() cho Customer mới
-    ├── bulk_update() cho Customer có tên mới
-    ├── bulk_create() cho Enrollment mới
-    ├── bulk_update() cho Enrollment thay đổi
-    └── bulk_update() cho Customer aggregate fields
-```
-
-### Bug #001: endTime sai múi giờ
-
-**File:** [botapp/services.py](botapp/services.py) — hàm `fetch_students_for_course`
-
-**Nguyên nhân:** Dùng `timezone.now()` (giờ UTC) làm `endTime` nhưng API Voomly interpret theo `timeZone=Etc/GMT-7`
-
-**Fix:**
-```python
-# Sai:
-"endTime": timezone.now().strftime("%Y-%m-%dT%H:%M:%S")
-
-# Đúng:
-"endTime": timezone.localtime().strftime("%Y-%m-%dT%H:%M:%S")
-```
-
----
 
 ## 📡 API Endpoints — Đầy đủ
 
@@ -399,7 +343,7 @@ sync_all_students_from_voomly()
 | POST | `/api/courses/create/` | Tạo khóa học + links |
 | PUT | `/api/courses/:id/update/` | Cập nhật khóa học |
 | DELETE | `/api/courses/:id/delete/` | Xóa khóa học |
-| GET | `/api/courses/:id/` | Chi tiết khóa học + Voomly students |
+| GET | `/api/courses/:id/` | Chi tiết khóa học + danh sách học viên |
 | POST | `/courses/update-website/` | Cập nhật link website khóa học |
 
 ### Enrollments
@@ -407,8 +351,6 @@ sync_all_students_from_voomly()
 | Method | URL | Chức năng |
 |---|---|---|
 | POST | `/api/enroll/` | Đăng ký học viên vào khóa học |
-| POST | `/api/sync/courses/` | Đồng bộ khóa học từ Voomly |
-| POST | `/api/sync/students/` | Đồng bộ học viên từ Voomly |
 
 ---
 
@@ -419,7 +361,6 @@ sync_all_students_from_voomly()
 | Field | Type | Ghi chú |
 |---|---|---|
 | `id` | AutoField | PK |
-| `spotlight_id` | CharField(50) | unique, nullable — ánh xạ Voomly |
 | `name` | CharField(255) | unique |
 | `description` | TextField | |
 | `web_link` | URLField(500) | Auto-generate từ name nếu trống |
@@ -517,7 +458,7 @@ cd ..
 
 # 4. Tạo .env
 copy .env.example .env
-# ⚠️ Mở .env và điền: token Telegram, Gmail, database, Voomly...
+# ⚠️ Mở .env và điền: token Telegram, Gmail, database...
 
 # 5. Migrate DB
 python manage.py migrate
@@ -534,17 +475,6 @@ python manage.py run_otp_bot         # Telegram bot
 ---
 
 ## 🔧 Troubleshooting
-
-### Web không hiển thị học viên từ Voomly
-
-Kiểm tra log Django ở terminal:
-```
-[Voomly] fetch_students_for_course: BẮT ĐẦU...
-[Voomly] URL=... | VOOMLY_BEARER_TOKEN=...
-[Voomly] Response status=200...
-```
-
-Nếu không thấy log → kiểm tra VSOMLY_BEARER_TOKEN trong `.env`.
 
 ### Bot Telegram lỗi "Conflict: terminated by other getUpdates request"
 
@@ -569,7 +499,6 @@ python manage.py showmigrations
 
 ## 📚 Liên kết
 
-- [Hướng dẫn đồng bộ Voomly chi tiết](VOOMLY_SYNC_GUIDE.md) — Kiến trúc, tối ưu, bug log
 - [Kế hoạch chuyển đổi React](.claude/plans/agile-exploring-sparrow.md) — Lộ trình React migration
 
 ---

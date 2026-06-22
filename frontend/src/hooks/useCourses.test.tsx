@@ -23,7 +23,7 @@ const server = setupServer(
     return HttpResponse.json({
       course: { id: 1, name: 'Query Course' },
       student_count: 3,
-      voomly_students: [],
+      students: [],
     })
   }),
 

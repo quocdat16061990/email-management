@@ -28,7 +28,7 @@ echo -e "${CYAN}═════════════════════�
 echo ""
 
 # ─── Step 1: Check Requirements ───────────────────
-log "${YELLOW}[1/6] Kiểm tra yêu cầu...${NC}"
+log "${YELLOW}[1/5] Kiểm tra yêu cầu...${NC}"
 
 command -v python3 >/dev/null 2>&1 || command -v python >/dev/null 2>&1 || fail "Python chưa cài. Cài Python >= 3.10"
 PYTHON=$(command -v python3 || command -v python)
@@ -41,7 +41,7 @@ command -v npm >/dev/null 2>&1 || fail "npm chưa cài"
 ok "npm: $(npm --version)"
 
 # ─── Step 2: Check .env ────────────────────────────
-log "${YELLOW}[2/6] Kiểm tra file .env...${NC}"
+log "${YELLOW}[2/5] Kiểm tra file .env...${NC}"
 
 if [ ! -f ".env" ]; then
     if [ -f ".env.example" ]; then
@@ -56,7 +56,7 @@ fi
 check_env() {
     local key=$1
     local val=$(grep "^${key}=" .env | cut -d'=' -f2- | tr -d '"' | tr -d "'" | xargs)
-    if [ -z "$val" ] || [ "$val" = "nhập_token_của_bạn_vào_đây" ] || [ "$val" = "email_của_bạn@gmail.com" ] || [ "$val" = "mật_khẩu_app_của_bạn" ] || [ "$val" = "mật_khẩu_DB_của_bạn" ] || [ "$val" = "nhập_token_Voomly_của_bạn" ]; then
+    if [ -z "$val" ] || [ "$val" = "nhập_token_của_bạn_vào_đây" ] || [ "$val" = "email_của_bạn@gmail.com" ] || [ "$val" = "mật_khẩu_app_của_bạn" ] || [ "$val" = "mật_khẩu_DB_của_bạn" ]; then
         fail "Thiếu: $key trong .env — điền đầy đủ rồi chạy lại."
     fi
 }
@@ -72,7 +72,7 @@ check_env "DB_PASSWORD"
 ok ".env đã điền đầy đủ thông tin"
 
 # ─── Step 3: Install Python ────────────────────────
-log "${YELLOW}[3/6] Cài thư viện Python...${NC}"
+log "${YELLOW}[3/5] Cài thư viện Python...${NC}"
 
 if command -v python3 >/dev/null 2>&1; then
     PYTHON=python3
@@ -84,7 +84,7 @@ pip install -q -r requirements.txt 2>&1 | tail -1
 ok "Python packages: $(pip list 2>/dev/null | wc -l) packages"
 
 # ─── Step 4: Install Frontend ──────────────────────
-log "${YELLOW}[4/6] Cài thư viện Frontend (Node)...${NC}"
+log "${YELLOW}[4/5] Cài thư viện Frontend (Node)...${NC}"
 
 if [ -d "frontend" ]; then
     cd frontend
@@ -96,37 +96,12 @@ else
 fi
 
 # ─── Step 5: Migrate Database ──────────────────────
-log "${YELLOW}[5/6] Migrate database Supabase...${NC}"
+log "${YELLOW}[5/5] Migrate database Supabase...${NC}"
 
 $PYTHON manage.py migrate --run-syncdb 2>&1
 ok "Database migrated"
 
 $PYTHON manage.py showmigrations 2>&1 | grep -c "\[X\]" > /dev/null && ok "Tất cả migrations đã applied"
-
-# ─── Step 6: Sync Voomly ───────────────────────────
-log "${YELLOW}[6/6] Đồng bộ dữ liệu từ Voomly...${NC}"
-
-$PYTHON -c "
-import os, django, time
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-django.setup()
-
-from botapp.services import sync_courses_from_voomly, sync_all_students_from_voomly
-from botapp.models import Course, Customer
-
-print('  📚 Đồng bộ khóa học...', end=' ')
-t1 = time.time()
-r1 = sync_courses_from_voomly()
-print(f'{time.time()-t1:.1f}s — tạo mới: {r1[\"created\"]}, cập nhật: {r1[\"updated\"]}, tổng: {r1[\"total\"]}')
-
-print('  👥 Đồng bộ học viên...', end=' ')
-t2 = time.time()
-r2 = sync_all_students_from_voomly()
-print(f'{time.time()-t2:.1f}s — {r2[\"total_students\"]} học viên, {r2[\"courses_count\"]} khóa học')
-
-print(f'  📊 Tổng: {Course.objects.count()} khóa học, {Customer.objects.count()} học viên')
-" 2>&1
-ok "Đồng bộ Voomly hoàn tất"
 
 # ─── Done ───────────────────────────────────────────
 echo ""

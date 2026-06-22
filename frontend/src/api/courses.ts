@@ -1,5 +1,5 @@
 import { apiGet, apiPost, apiPut, apiDelete, apiGetBlob } from './client'
-import type { Course, CourseLink, VoomlyStudent } from '../types/course'
+import type { Course, CourseLink } from '../types/course'
 import type { Pagination } from '../types/api'
 import type { Enrollment } from '../types/enrollment'
 
@@ -22,8 +22,13 @@ export function exportCourses(params?: {
 export interface CourseDetailResponse {
   course: Course
   student_count: number
-  voomly_students: VoomlyStudent[]
-  voomly_error?: string
+  students: {
+    email: string
+    name: string
+    registration_date: string
+    expiry_date: string
+    status: string
+  }[]
 }
 
 export function fetchCourseDetail(id: number): Promise<CourseDetailResponse> {
@@ -32,7 +37,6 @@ export function fetchCourseDetail(id: number): Promise<CourseDetailResponse> {
 
 export interface CreateCourseInput {
   name: string
-  spotlight_id?: string
   description?: string
   web_link?: string
   links?: CourseLink[]
@@ -50,9 +54,6 @@ export function deleteCourse(id: number): Promise<{ success: boolean; message: s
   return apiDelete(`/api/courses/${id}/delete/`)
 }
 
-export function syncCourses(): Promise<{ success: boolean; result: { total: number; created: number; updated: number } }> {
-  return apiPost('/api/sync/courses/', {})
-}
 
 export interface EnrollStudentInput {
   course_id: number
@@ -65,7 +66,7 @@ export interface EnrollStudentInput {
   status?: string
 }
 
-export function enrollStudent(data: EnrollStudentInput): Promise<{ success: boolean; enrollment: Enrollment; voomly_synced: boolean }> {
+export function enrollStudent(data: EnrollStudentInput): Promise<{ success: boolean; enrollment: Enrollment }> {
   return apiPost('/api/enroll/', data)
 }
 

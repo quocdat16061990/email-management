@@ -20,5 +20,4 @@ export interface DashboardStats {
   pending_count: number;
   expired_count: number;
   total_courses: number;
-  total_voomly_courses: number;
 }

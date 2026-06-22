@@ -3,7 +3,6 @@ from django.utils.text import slugify
 
 
 class Course(models.Model):
-    spotlight_id = models.CharField(max_length=50, unique=True, null=True, blank=True)
     name = models.CharField(max_length=255, unique=True)
     description = models.TextField(blank=True, default="")
     web_link = models.URLField(max_length=500, blank=True, default="")

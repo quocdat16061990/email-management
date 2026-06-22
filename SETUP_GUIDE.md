@@ -30,21 +30,19 @@ Mở file `.env` và điền đầy đủ các thông tin sau:
 | `TELEGRAM_BOT_TOKEN` | [@BotFather](https://t.me/BotFather) trên Telegram |
 | `EMAIL_ACCOUNT` + `APP_PASSWORD` | Gmail → App Password |
 | `DB_HOST`...`DB_PASSWORD` | Supabase → Project Settings → Database |
-| `VOOMLY_BEARER_TOKEN` | Voomly Dashboard → Settings → API |
-
+ 
 ### Bước 3: Chạy file setup
-
+ 
 > ⚠️ **Đảm bảo đã điền đầy đủ .env trước khi chạy**
-
+ 
 ```powershell
 setup.bat
 ```
-
+ 
 File này sẽ tự động:
 1. Cài thư viện Python (pip install)
 2. Cài thư viện Frontend (npm install)
 3. Migrate database Supabase
-4. Đồng bộ dữ liệu từ Voomly (khóa học + học viên)
 
 ### Bước 4: Chạy ứng dụng (3 terminal)
 

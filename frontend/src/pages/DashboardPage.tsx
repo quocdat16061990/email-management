@@ -1,5 +1,5 @@
 import { lazy, Suspense, useMemo, useState } from 'react'
-import { useStudentList, useDeleteStudent, useSyncStudents } from '@/hooks/useStudents'
+import { useStudentList, useDeleteStudent } from '@/hooks/useStudents'
 import { useCourseList } from '@/hooks/useCourses'
 import { useDashboardStats } from '@/hooks/useAuth'
 import SearchInput from '@/components/shared/SearchInput'
@@ -46,7 +46,6 @@ export default function DashboardPage() {
     status: selectedStatus,
   })
   const deleteMutation = useDeleteStudent()
-  const syncMutation = useSyncStudents()
   
   // Fetch all courses for the filtering dropdowns and Export Modal
   const allCoursesQuery = useCourseList({ all: true })
@@ -93,12 +92,6 @@ export default function DashboardPage() {
     })
   }
 
-  const handleSync = () => {
-    syncMutation.mutate(undefined, {
-      onSuccess: (res) => showToast('success', `Đồng bộ thành công! ${res.result.total_students} học viên.`),
-      onError: (err: Error) => showToast('error', err.message),
-    })
-  }
 
   const openCreate = () => {
     setEditStudent(null)
@@ -242,11 +235,6 @@ export default function DashboardPage() {
             <span>{selectedIds.length > 0 ? `Xuất Excel (${selectedIds.length} đã chọn)` : 'Xuất Excel'}</span>
           </button>
 
-          <button onClick={handleSync} disabled={syncMutation.isPending}
-            className="px-4 py-2 rounded-xl border border-gray-200 bg-white text-gray-700 text-sm font-medium hover:bg-gray-50 transition-all shadow-sm disabled:opacity-60 cursor-pointer"
-          >
-            {syncMutation.isPending ? 'Đang đồng bộ...' : 'Đồng bộ từ Voomly'}
-          </button>
           
           <button onClick={openCreate}
             className="px-4 py-2 rounded-xl bg-gradient-to-r from-brand-500 to-accent-600 text-white text-sm font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all shadow-sm cursor-pointer"

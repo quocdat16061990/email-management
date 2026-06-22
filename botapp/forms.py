@@ -81,25 +81,20 @@ class CustomerRegistrationForm(forms.Form):
             if line.strip()
         ]
         return existing_courses + extra_courses
-
-
 class CourseForm(forms.ModelForm):
     class Meta:
         model = Course
-        fields = ["name", "spotlight_id", "description", "web_link"]
+        fields = ["name", "description", "web_link"]
         labels = {
             "name": "Tên khóa học",
-            "spotlight_id": "Spotlight ID (Voomly)",
             "description": "Mô tả khóa học",
             "web_link": "Link website khóa học",
         }
         widgets = {
             "name": forms.TextInput(attrs={"placeholder": "Ví dụ: Python Basic"}),
-            "spotlight_id": forms.TextInput(attrs={"placeholder": "Ví dụ: rwbteni8pn"}),
             "description": forms.Textarea(attrs={"placeholder": "Nhập mô tả khóa học...", "rows": 3}),
             "web_link": forms.TextInput(attrs={"placeholder": "Ví dụ: https://example.com/course (để trống sẽ tự động tạo link mặc định)"}),
         }
-
 
     def clean_name(self) -> str:
         name = self.cleaned_data["name"].strip()

@@ -7,7 +7,7 @@ echo    ANHLAPTRINH MANAGEMENT - WINDOWS SETUP
 echo ==========================================
 echo.
 
-echo [1/6] Kiểm tra yêu cầu...
+echo [1/5] Kiểm tra yêu cầu...
 python --version >nul 2>&1
 if %errorlevel% neq 0 (
     echo [ERROR] Python chưa cài. Vui lòng cài Python >= 3.10
@@ -28,7 +28,7 @@ echo - Node.js: OK
 echo - npm: OK
 echo.
 
-echo [2/6] Kiểm tra file .env...
+echo [2/5] Kiểm tra file .env...
 if not exist .env (
     if exist .env.example (
         copy .env.example .env
@@ -50,14 +50,14 @@ if %errorlevel% neq 0 (
 echo - File .env: OK
 echo.
 
-echo [3/6] Cài thư viện Python...
+echo [3/5] Cài thư viện Python...
 python -m pip install --upgrade pip -q
 pip install -r requirements.txt
 pip install requests
 echo - Thư viện Python: OK
 echo.
 
-echo [4/6] Cài thư viện Frontend (Node)...
+echo [4/5] Cài thư viện Frontend (Node)...
 if exist frontend (
     cd frontend
     call npm install
@@ -68,14 +68,11 @@ if exist frontend (
 )
 echo.
 
-echo [5/6] Migrate database Supabase...
+echo [5/5] Migrate database Supabase...
 python manage.py migrate --run-syncdb
 echo - Database migrated: OK
 echo.
 
-echo [6/6] Đồng bộ dữ liệu từ Voomly...
-python -c "import os, sys, django, time; sys.path.append(os.getcwd()); os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings'); django.setup(); from botapp.services import sync_courses_from_voomly, sync_all_students_from_voomly; print('Dong bo khoa hoc...'); r1 = sync_courses_from_voomly(); print(f'Done courses: created: {r1[\"created\"]}, updated: {r1[\"updated\"]}, total: {r1[\"total\"]}'); print('Dong bo hoc vien...'); r2 = sync_all_students_from_voomly(); print(f'Done students: {r2[\"total_students\"]} students, {r2[\"courses_count\"]} courses')"
-echo - Đồng bộ Voomly: OK
 echo.
 
 echo ==========================================

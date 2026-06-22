@@ -57,10 +57,6 @@ export function deleteStudent(id: number): Promise<{ success: boolean; message: 
   return apiDelete(`/api/dashboard/${id}/delete/`)
 }
 
-export function syncStudents(): Promise<{ success: boolean; result: { total_students: number; courses_count: number } }> {
-  return apiPost('/api/sync/students/', {})
-}
-
 export interface StudentSearchResponse {
   students: StudentSearchResult[]
   pagination: Pagination

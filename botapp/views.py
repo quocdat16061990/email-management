@@ -16,12 +16,7 @@ from django.views.decorators.csrf import csrf_exempt
 from .forms import CourseForm, CustomerRegistrationForm, LoginForm
 from .models import Course, CourseLink, Customer, Enrollment
 from .services import (
-    add_student_to_voomly,
-    fetch_students_for_course,
     normalize_phone_number,
-    sync_all_students_from_voomly,
-    sync_courses_from_voomly,
-    wait_for_voomly_student,
     upsert_customer_from_web,
 )
 
@@ -141,7 +136,6 @@ def course_detail_api(request: HttpRequest) -> JsonResponse:
     return JsonResponse({
         "id": course.id,
         "name": course.name,
-        "spotlight_id": course.spotlight_id or "",
         "description": course.description or "",
         "web_link": course.web_link or "",
         "links": links_data,
@@ -152,15 +146,6 @@ def course_detail_api(request: HttpRequest) -> JsonResponse:
 @web_login_required
 def student_detail_view(request: HttpRequest, student_id: int) -> HttpResponse:
     return redirect(f"{settings.FRONTEND_URL}/students/{student_id}")
-
-
-@api_login_required
-def sync_courses_view(request: HttpRequest) -> HttpResponse:
-    try:
-        result = sync_courses_from_voomly()
-        return JsonResponse({"success": True, "result": result})
-    except Exception as e:
-        return JsonResponse({"error": f"Lỗi đồng bộ: {e}"}, status=500)
 
 
 @csrf_exempt
@@ -189,15 +174,6 @@ def update_course_website_api(request: HttpRequest) -> JsonResponse:
         "message": f"Đã cập nhật website cho khóa học '{course.name}' thành công.",
         "web_link": course.web_link
     })
-
-
-@api_login_required
-def sync_students_view(request: HttpRequest) -> HttpResponse:
-    try:
-        result = sync_all_students_from_voomly()
-        return JsonResponse({"success": True, "result": result})
-    except Exception as e:
-        return JsonResponse({"error": f"Lỗi đồng bộ: {e}"}, status=500)
 
 
 @api_login_required
@@ -855,18 +831,15 @@ def api_dashboard_stats(request: HttpRequest) -> JsonResponse:
     pending = Customer.objects.filter(status="PENDING").count()
     expired = Customer.objects.filter(status="EXPIRED").count()
     total_courses = Course.objects.count()
-    voomly_courses = Course.objects.exclude(spotlight_id__isnull=True).exclude(spotlight_id="").count()
     return JsonResponse({
         "total_students": total,
         "active_count": active,
         "pending_count": pending,
         "expired_count": expired,
         "total_courses": total_courses,
-        "total_voomly_courses": voomly_courses,
     })
 
 
-# ─── API: Courses ─────────────────────────────────────────────────────────────
 
 @api_login_required
 def api_courses_list(request: HttpRequest) -> JsonResponse:
@@ -903,7 +876,6 @@ def api_courses_list(request: HttpRequest) -> JsonResponse:
             courses_data.append({
                 "id": c.id,
                 "name": c.name,
-                "spotlight_id": c.spotlight_id or "",
                 "description": c.description or "",
                 "web_link": c.web_link or "",
                 "student_count": c.student_count,
@@ -929,7 +901,6 @@ def api_courses_list(request: HttpRequest) -> JsonResponse:
         courses_data.append({
             "id": c.id,
             "name": c.name,
-            "spotlight_id": c.spotlight_id or "",
             "description": c.description or "",
             "web_link": c.web_link or "",
             "student_count": c.student_count,
@@ -966,7 +937,6 @@ def api_courses_create(request: HttpRequest) -> JsonResponse:
 
     course = Course.objects.create(
         name=name,
-        spotlight_id=data.get("spotlight_id", "").strip() or None,
         description=data.get("description", "").strip(),
         web_link=data.get("web_link", "").strip(),
     )
@@ -992,7 +962,6 @@ def api_courses_update(request: HttpRequest, id: int) -> JsonResponse:
 
     if data.get("name"):
         course.name = data["name"].strip()
-    course.spotlight_id = data.get("spotlight_id", "").strip() or None
     course.description = data.get("description", "").strip()
     course.web_link = data.get("web_link", "").strip()
     course.save()
@@ -1022,27 +991,28 @@ def api_course_detail_json(request: HttpRequest, id: int) -> JsonResponse:
     student_count = Enrollment.objects.filter(course=course).count()
     links_data = [{"title": l.title, "url": l.url} for l in course.links.all()]
 
-    voomly_students = []
-    voomly_error = ""
-    if course.spotlight_id:
-        try:
-            voomly_students = fetch_students_for_course(course)
-        except Exception as exc:
-            voomly_error = str(exc)
+    enrollments = Enrollment.objects.filter(course=course).select_related("customer")
+    students_data = []
+    for e in enrollments:
+        students_data.append({
+            "email": e.customer.customer_email,
+            "name": e.customer.full_name or "Học viên",
+            "registration_date": str(e.registration_date) if e.registration_date else "",
+            "expiry_date": str(e.expiry_date) if e.expiry_date else "",
+            "status": e.status,
+        })
 
     return JsonResponse({
         "course": {
             "id": course.id,
             "name": course.name,
-            "spotlight_id": course.spotlight_id or "",
             "description": course.description or "",
             "web_link": course.web_link or "",
             "links": links_data,
             "created_at": course.created_at.isoformat(),
         },
         "student_count": student_count,
-        "voomly_students": voomly_students,
-        "voomly_error": voomly_error,
+        "students": students_data,
     })
 
 
@@ -1087,18 +1057,6 @@ def api_enroll_student(request: HttpRequest) -> JsonResponse:
     )
     student.sync_overall_fields()
 
-    voomly_synced = False
-    if course.spotlight_id:
-        success = add_student_to_voomly(
-            course=course,
-            name=student.full_name or "Học viên",
-            email=student.customer_email,
-            phone=student.phone_number or "",
-        )
-        if success:
-            wait_for_voomly_student(course, student.customer_email)
-            voomly_synced = True
-
     return JsonResponse({
         "success": True,
         "enrollment": {
@@ -1110,30 +1068,10 @@ def api_enroll_student(request: HttpRequest) -> JsonResponse:
             "status": enrollment.status,
             "created": created,
         },
-        "voomly_synced": voomly_synced,
     })
 
 
-# ─── API: Sync ────────────────────────────────────────────────────────────────
 
-@csrf_exempt
-@api_login_required
-def api_sync_courses(request: HttpRequest) -> JsonResponse:
-    try:
-        result = sync_courses_from_voomly()
-        return JsonResponse({"success": True, "result": result})
-    except Exception as e:
-        return JsonResponse({"error": f"Lỗi đồng bộ khóa học: {e}"}, status=500)
-
-
-@csrf_exempt
-@api_login_required
-def api_sync_students(request: HttpRequest) -> JsonResponse:
-    try:
-        result = sync_all_students_from_voomly()
-        return JsonResponse({"success": True, "result": result})
-    except Exception as e:
-        return JsonResponse({"error": f"Lỗi đồng bộ học viên: {e}"}, status=500)
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

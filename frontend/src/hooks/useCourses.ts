@@ -6,7 +6,6 @@ import {
   createCourse,
   updateCourse,
   deleteCourse,
-  syncCourses,
   enrollStudent,
   updateCourseWebsite,
   type CreateCourseInput,
@@ -58,14 +57,6 @@ export function useDeleteCourse() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (id: number) => deleteCourse(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['courses'] }),
-  })
-}
-
-export function useSyncCourses() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: () => syncCourses(),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['courses'] }),
   })
 }

@@ -2,7 +2,7 @@ import { describe, test, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import DashboardPage from './DashboardPage'
-import { useStudentList, useDeleteStudent, useSyncStudents } from '../hooks/useStudents'
+import { useStudentList, useDeleteStudent } from '../hooks/useStudents'
 import { useCourseList } from '../hooks/useCourses'
 import { fetchDashboardStats } from '../api/auth'
 import { BrowserRouter } from 'react-router-dom'
@@ -11,7 +11,6 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 vi.mock('../hooks/useStudents', () => ({
   useStudentList: vi.fn(),
   useDeleteStudent: vi.fn(),
-  useSyncStudents: vi.fn(),
 }))
 
 vi.mock('../hooks/useCourses', () => ({
@@ -59,11 +58,6 @@ describe('pages/DashboardPage.tsx', () => {
       isPending: false,
     } as any)
 
-    vi.mocked(useSyncStudents).mockReturnValue({
-      mutate: vi.fn(),
-      isPending: false,
-    } as any)
-
     vi.mocked(useCourseList).mockReturnValue({
       data: { courses: [] },
       isLoading: false,
@@ -87,7 +81,6 @@ describe('pages/DashboardPage.tsx', () => {
     expect(screen.getAllByText('Đã hết hạn')[0]).toBeInTheDocument()
 
     expect(screen.getByPlaceholderText('Tìm kiếm học viên...')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Đồng bộ từ Voomly/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /\+ Thêm học viên/i })).toBeInTheDocument()
   })
 

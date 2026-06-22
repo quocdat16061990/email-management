@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useCourseList, useDeleteCourse, useSyncCourses, useUpdateWebsite } from '../hooks/useCourses'
+import { useCourseList, useDeleteCourse, useUpdateWebsite } from '../hooks/useCourses'
 import Pagination from '../components/shared/Pagination'
 import LoadingSpinner from '../components/shared/LoadingSpinner'
 import EmptyState from '../components/shared/EmptyState'
@@ -28,7 +28,6 @@ export default function CoursesPage() {
     sort_order: sortOrder,
   })
   const deleteMutation = useDeleteCourse()
-  const syncMutation = useSyncCourses()
   const updateWebsiteMutation = useUpdateWebsite()
 
   const [editingWebsite, setEditingWebsite] = useState<{ id: number; name: string; url: string } | null>(null)
@@ -51,12 +50,6 @@ export default function CoursesPage() {
     })
   }
 
-  const handleSync = () => {
-    syncMutation.mutate(undefined, {
-      onSuccess: (res) => showToast('success', `Đồng bộ thành công! ${res.result.total} khóa học.`),
-      onError: (err: any) => showToast('error', err.message),
-    })
-  }
 
   const handleSaveWebsite = () => {
     if (!editingWebsite) return
@@ -91,13 +84,6 @@ export default function CoursesPage() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
             </svg>
             <span>{selectedIds.length > 0 ? `Xuất Excel (${selectedIds.length} đã chọn)` : 'Xuất Excel'}</span>
-          </button>
-          <button
-            onClick={handleSync}
-            disabled={syncMutation.isPending}
-            className="px-4 py-2 rounded-xl bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 transition-all shadow-sm disabled:opacity-60"
-          >
-            {syncMutation.isPending ? 'Đang đồng bộ...' : 'Đồng bộ từ Voomly'}
           </button>
           <button
             onClick={() => {

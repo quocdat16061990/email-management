@@ -2,14 +2,13 @@ import { describe, test, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import CoursesPage from './CoursesPage'
-import { useCourseList, useDeleteCourse, useSyncCourses, useUpdateWebsite } from '../hooks/useCourses'
+import { useCourseList, useDeleteCourse, useUpdateWebsite } from '../hooks/useCourses'
 import { BrowserRouter } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 vi.mock('../hooks/useCourses', () => ({
   useCourseList: vi.fn(),
   useDeleteCourse: vi.fn(),
-  useSyncCourses: vi.fn(),
   useUpdateWebsite: vi.fn(),
 }))
 
@@ -50,11 +49,6 @@ describe('pages/CoursesPage.tsx', () => {
       isPending: false,
     } as any)
 
-    vi.mocked(useSyncCourses).mockReturnValue({
-      mutate: vi.fn(),
-      isPending: false,
-    } as any)
-
     vi.mocked(useUpdateWebsite).mockReturnValue({
       mutate: vi.fn(),
       isPending: false,
@@ -66,7 +60,6 @@ describe('pages/CoursesPage.tsx', () => {
 
     expect(screen.getByText('Danh sách khóa học')).toBeInTheDocument()
     expect(screen.getByText('Quản lý các chương trình học tập đang hoạt động.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Đồng bộ từ Voomly/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /\+ Thêm khóa học/i })).toBeInTheDocument()
   })
 

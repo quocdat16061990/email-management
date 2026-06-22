@@ -43,8 +43,8 @@ describe('pages/CourseDetailPage.tsx', () => {
       data: {
         course: { id: 1, name: 'Detail Course 101', description: 'Test course details description', web_link: 'http://testweb.org' },
         student_count: 7,
-        voomly_students: [
-          { name: 'Voomly Member A', email: 'voomlyA@test.com', registration_date: '2026-05-23T04:30:20Z', expiry_date: '2027-05-23T04:30:20Z', status: 'ACTIVE' }
+        students: [
+          { name: 'Local Member A', email: 'localA@test.com', registration_date: '2026-05-23T04:30:20Z', expiry_date: '2027-05-23T04:30:20Z', status: 'ACTIVE' }
         ]
       },
       isLoading: false,
@@ -79,10 +79,10 @@ describe('pages/CourseDetailPage.tsx', () => {
     expect(screen.getByRole('link', { name: /Website Khóa Học/i })).toHaveAttribute('href', 'http://testweb.org')
   })
 
-  test('renders student table showing registrations matching Voomly records', () => {
+  test('renders student table showing registrations matching local records', () => {
     renderCourseDetailPage()
 
-    expect(screen.getByText('Voomly Member A')).toBeInTheDocument()
-    expect(screen.getByText('voomlyA@test.com')).toBeInTheDocument()
+    expect(screen.getByText('Local Member A')).toBeInTheDocument()
+    expect(screen.getByText('localA@test.com')).toBeInTheDocument()
   })
 })

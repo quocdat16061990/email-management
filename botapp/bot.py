@@ -77,7 +77,7 @@ def _is_staff_customer(customer) -> bool:
 
 
 def _menu_for_customer(customer):
-    return main_menu_keyboard(is_admin=_is_admin_customer(customer))
+    return main_menu_keyboard(is_admin=_is_staff_customer(customer))
 
 
 def _admin_course_prompt(email_text: str, name_text: str, phone_text: str, selected_ids: list[int], total_courses: int) -> str:
@@ -403,12 +403,17 @@ async def handle_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def fetch_openai_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
+
+    chat_id = update.effective_chat.id
+    customer = await _find_customer_by_chat_id(chat_id)
+    if customer and _is_staff_customer(customer):
+        await show_accounts(update, context, query=query)
+        return
+
     email_text = context.user_data.get("email")
 
     if not email_text:
         # Try to get email from DB
-        chat_id = update.effective_chat.id
-        customer = await _find_customer_by_chat_id(chat_id)
         if customer:
             email_text = customer.customer_email
             context.user_data["email"] = email_text
@@ -729,60 +734,18 @@ async def admin_course_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await query.answer()
     
-    # 1. Loading 0%
+    # 1. Loading
     await query.edit_message_text(
-        "⏳ *Đang tiến hành tạo học viên... (0%)*",
+        "⏳ *Đang tiến hành tạo/cập nhật học viên...*",
         parse_mode="Markdown",
     )
     
-    # 2. Save student and local enrollments (do NOT sync to voomly inside this call)
+    # 2. Save student and local enrollments
     saved_customer, created = await sync_to_async(assign_courses_to_customer_from_admin)(
         email_text,
         selected_ids,
         full_name=name_text,
         phone_number=phone_text,
-        sync_to_voomly=False,
-    )
-    
-    # 3. Find courses that need sync
-    from botapp.models import Course
-    courses_to_sync = []
-    for c_id in selected_ids:
-        c = await sync_to_async(Course.objects.filter(id=c_id).first)()
-        if c and c.spotlight_id:
-            courses_to_sync.append(c)
-            
-    total_sync = len(courses_to_sync)
-    voomly_sync_status = []
-    
-    # 4. Sync each course and update progress
-    from botapp.services import add_student_to_voomly, wait_for_voomly_student
-    for idx, course in enumerate(courses_to_sync):
-        # Calculate percentage
-        percent = int(((idx) / (total_sync + 1)) * 100)
-        await query.edit_message_text(
-            f"⏳ *Đang đồng bộ khóa học {idx+1}/{total_sync}... ({percent}%)*\n"
-            f"📚 Khóa: `{course.name}`",
-            parse_mode="Markdown",
-        )
-        
-        success = await sync_to_async(add_student_to_voomly)(
-            course=course,
-            name=saved_customer.full_name or "Học viên",
-            email=saved_customer.customer_email,
-            phone=saved_customer.phone_number or "",
-        )
-        
-        if success:
-            await sync_to_async(wait_for_voomly_student)(course, saved_customer.customer_email)
-            voomly_sync_status.append((course.name, True))
-        else:
-            voomly_sync_status.append((course.name, False))
-            
-    # Loading 95%
-    await query.edit_message_text(
-        "⏳ *Đang hoàn tất lưu thông tin... (95%)*",
-        parse_mode="Markdown",
     )
     
     # Reload enrollments and build report lines
@@ -791,14 +754,7 @@ async def admin_course_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
     course_lines = []
     for enrollment in assigned_courses:
         c_name = escape_markdown(enrollment.course.name)
-        sync_result = next((status for name, status in voomly_sync_status if name == enrollment.course.name), None)
-        if sync_result is True:
-            status_emoji = "✅ (Đã gửi email)"
-        elif sync_result is False:
-            status_emoji = "❌ (Lỗi gửi email/Voomly)"
-        else:
-            status_emoji = "⚪ (Không cần Voomly)" # No spotlight_id
-        course_lines.append(f"• 📘 {c_name}: {status_emoji}")
+        course_lines.append(f"• 📘 {c_name}")
         
     course_block = "\n".join(course_lines)
     action_text = "Đã thêm mới" if created else "Đã cập nhật"
@@ -811,13 +767,12 @@ async def admin_course_confirm(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data.pop("admin_selected_course_ids", None)
     
     await query.edit_message_text(
-        f"✅ *{action_text} học viên thành công! (100%)*\n\n"
+        f"✅ *{action_text} học viên thành công!*\n\n"
         f"📧 `{saved_customer.customer_email}`\n"
         f"👤 {escape_markdown(saved_customer.full_name) or 'Chưa cập nhật'}\n"
         f"📞 SĐT: `{saved_customer.phone_number or 'Chưa cập nhật'}`\n"
         f"🔄 Trạng thái: {ENROLLMENT_STATUS_LABELS.get(saved_customer.status, saved_customer.status)}\n\n"
-        f"📚 *Khóa học đã gán:*\n{course_block}\n\n"
-        "Người này đã được lưu và gửi email kích hoạt từ Voomly (nếu có).",
+        f"📚 *Khóa học đã gán:*\n{course_block}",
         reply_markup=_menu_for_customer(customer),
         parse_mode="Markdown",
     )
@@ -857,29 +812,57 @@ async def otp_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 
+async def show_accounts(update: Update, context: ContextTypes.DEFAULT_TYPE, query=None) -> None:
+    from .models import ChatGPTAccount
+    accounts = await sync_to_async(list)(ChatGPTAccount.objects.filter(status="ACTIVE").order_by("email"))
+    if not accounts:
+        msg = "📋 Không có tài khoản ChatGPT Plus nào đang hoạt động."
+        if query:
+            await query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
+        return
+
+    message_text = (
+        "📋 *MÃ OTP OPENAI - CHATGPT ACCOUNTS*\n"
+        "──────────────────────────────\n"
+        "👉 Chọn nút dưới đây để lấy mã OTP tương ứng sau khi yêu cầu gửi mã từ OpenAI."
+    )
+
+    reply_markup = chatgpt_accounts_keyboard(accounts)
+
+    if query:
+        await query.edit_message_text(
+            message_text,
+            reply_markup=reply_markup,
+            parse_mode="Markdown",
+        )
+    else:
+        await update.message.reply_text(
+            message_text,
+            reply_markup=reply_markup,
+            parse_mode="Markdown",
+        )
+
+
 async def accounts_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     customer = await _find_customer_by_chat_id(chat_id)
     if not customer or not _is_staff_customer(customer):
         await update.message.reply_text("❌ Bạn không có quyền truy cập chức năng này.")
         return
+    await show_accounts(update, context)
 
-    from .models import ChatGPTAccount
-    accounts = await sync_to_async(list)(ChatGPTAccount.objects.filter(status="ACTIVE").order_by("email"))
-    if not accounts:
-        await update.message.reply_text("📋 Không có tài khoản ChatGPT Plus nào đang hoạt động.")
+
+async def accounts_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    chat_id = update.effective_chat.id
+    customer = await _find_customer_by_chat_id(chat_id)
+    if not customer or not _is_staff_customer(customer):
+        await query.edit_message_text("❌ Bạn không có quyền truy cập chức năng này.")
         return
-
-    message_text = "📋 *Danh sách tài khoản ChatGPT Plus:*\n\n"
-    for idx, acc in enumerate(accounts, 1):
-        message_text += f"{idx}️⃣ *Tài khoản:* `{acc.email}`\n🔑 *Mật khẩu:* `{acc.password}`\n\n"
-    message_text += "👉 Chọn nút dưới đây để lấy mã OTP tương ứng sau khi yêu cầu gửi mã từ OpenAI."
-
-    await update.message.reply_text(
-        message_text,
-        reply_markup=chatgpt_accounts_keyboard(accounts),
-        parse_mode="Markdown",
-    )
+    await show_accounts(update, context, query=query)
 
 
 async def fetch_chatgpt_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -919,7 +902,7 @@ async def fetch_chatgpt_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         logger.exception("Không đọc được Gmail OpenAI OTP.")
         await query.edit_message_text(
             f"❌ Không đọc được Gmail của `{account.email}` lúc này. Vui lòng kiểm tra lại cấu hình IMAP hoặc mật khẩu ứng dụng.",
-            reply_markup=chatgpt_accounts_keyboard([account]),
+            reply_markup=chatgpt_accounts_keyboard([account], show_back_to_list=True),
         )
         return
 
@@ -927,7 +910,7 @@ async def fetch_chatgpt_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.edit_message_text(
             f"⏳ Không tìm thấy OTP OpenAI cho `{account.email}` trong vòng 2 phút.\n"
             "Hãy gửi lại yêu cầu đăng nhập bên OpenAI rồi bấm nút dưới để thử lại.",
-            reply_markup=chatgpt_accounts_keyboard([account]),
+            reply_markup=chatgpt_accounts_keyboard([account], show_back_to_list=True),
         )
         return
 
@@ -935,7 +918,7 @@ async def fetch_chatgpt_otp(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         f"🔑 Mã OTP của `{account.email}` là:\n\n"
         f"👉 *`{otp_code}`*\n\n"
         f"Hãy nhập mã này vào trang đăng nhập OpenAI để hoàn tất.",
-        reply_markup=chatgpt_accounts_keyboard([account]),
+        reply_markup=chatgpt_accounts_keyboard([account], show_back_to_list=True),
         parse_mode="Markdown",
     )
 
@@ -1174,6 +1157,7 @@ def build_application() -> Application:
     application.add_handler(conversation_handler)
     application.add_handler(admin_add_conversation_handler)
     application.add_handler(CommandHandler("accounts", accounts_command))
+    application.add_handler(CallbackQueryHandler(accounts_callback, pattern="^view_accounts$"))
     application.add_handler(CommandHandler("me", my_info))
     application.add_handler(CommandHandler("courses", my_courses))
     application.add_handler(CommandHandler("lookup", lookup_customer))

@@ -7,7 +7,6 @@ import {
   createStudent,
   updateStudent,
   deleteStudent,
-  syncStudents,
   searchStudents,
 } from './students'
 
@@ -42,10 +41,6 @@ const server = setupServer(
 
   http.delete('/api/dashboard/1/delete/', () => {
     return HttpResponse.json({ success: true, message: 'Deleted Student' })
-  }),
-
-  http.post('/api/sync/students/', () => {
-    return HttpResponse.json({ success: true, result: { total_students: 50, courses_count: 5 } })
   }),
 
   http.get('/courses/search-students/', () => {
@@ -90,12 +85,6 @@ describe('api/students.ts', () => {
     const res = await deleteStudent(1)
     expect(res.success).toBe(true)
     expect(res.message).toBe('Deleted Student')
-  })
-
-  test('syncStudents triggers student sync', async () => {
-    const res = await syncStudents()
-    expect(res.success).toBe(true)
-    expect(res.result.total_students).toBe(50)
   })
 
   test('searchStudents searches for students within a course', async () => {
